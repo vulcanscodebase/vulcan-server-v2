@@ -30,6 +30,9 @@ export const initializeSuperAdmin = async (): Promise<void> => {
       console.log(
         "⚠️ Role 'super-admin' not found — creating one automatically..."
       );
+
+      const SUPER_ADMIN_ID = "67fe38636b44e2a71b1a96e7";
+
       superAdminRole = await Role.create({
         name: "super-admin",
         defaultPermissions: [
@@ -38,7 +41,7 @@ export const initializeSuperAdmin = async (): Promise<void> => {
             actions: ["view", "create", "edit", "delete", "publish"],
           },
         ],
-        createdBy: null, // or handle dynamically if you have a system account
+        createdBy: SUPER_ADMIN_ID, // or handle dynamically if you have a system account
       });
       console.log("✅ 'super-admin' role created.");
     }
