@@ -13,22 +13,22 @@ interface Permission {
 export interface IAdmin extends Document {
   name: string;
   email: string;
-  password?: string;
-  googleId?: string;
-  profilePhoto?: string;
-  role?: Types.ObjectId | IRole;
+  password?: string | undefined;
+  googleId?: string | undefined;
+  profilePhoto?: string | undefined;
+  role?: Types.ObjectId | IRole | undefined;
   allowedToCreateRoles: string[];
   isSuperAdmin: boolean;
-  rolePermissions?: Permission[];
-  customPermissions?: Permission[];
-  extraPermissions?: Permission[];
-  canCreateRoles?: boolean;
-  canGrantExtraPermissions?: boolean;
-  canCreateUser?: boolean;
-  canUpdateUser?: boolean;
-  canDeleteUser?: boolean;
-  passwordResetToken?: string;
-  passwordResetExpires?: Date;
+  rolePermissions?: Permission[] | undefined;
+  customPermissions?: Permission[] | undefined;
+  extraPermissions?: Permission[] | undefined;
+  canCreateRoles?: boolean | undefined;
+  canGrantExtraPermissions?: boolean | undefined;
+  canCreateUser?: boolean | undefined;
+  canUpdateUser?: boolean | undefined;
+  canDeleteUser?: boolean | undefined;
+  passwordResetToken?: string | undefined;
+  passwordResetExpires?: Date | undefined;
   verified: boolean;
 
   generateAccessToken(): Promise<string>;
