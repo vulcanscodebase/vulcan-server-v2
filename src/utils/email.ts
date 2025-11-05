@@ -75,3 +75,15 @@ export const sendEmail = async (
     throw new Error("Failed to send email via both SendGrid and Nodemailer");
   }
 };
+
+// ✅ Admin Password Setup
+export const sendPasswordSetupEmail = async (
+  name: string,
+  email: string,
+  setupToken: string
+) => {
+  const setupUrl = `${process.env.ADMIN_URL}/setup-password?token=${setupToken}`;
+  const text = `Hello ${name},\n\nYou have been added as an admin. Please set up your password using the link below:\n\n${setupUrl}\n\nThis link expires in 24 hours.\n\nThank you.`;
+
+  await sendEmail(email, "Set Up Your Admin Account", text);
+};

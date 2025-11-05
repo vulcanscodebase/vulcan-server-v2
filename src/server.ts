@@ -14,6 +14,8 @@ import session from "express-session";
 import passport from "./config/passport.js";
 
 import authRoutes from "./routes/authRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
+
 import { initializeSuperAdmin } from "./utils/initializeSuperAdmin.js";
 import connectDB from "./config/db.js";
 
@@ -97,6 +99,7 @@ app.use(passport.session());
 
 // ✅ Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 
 // ✅ Health and Root routes
 app.get("/", (_req: Request, res: Response) => {
