@@ -59,7 +59,7 @@ const adminSchema = new mongoose.Schema<IAdmin>(
       type: String,
       minlength: [8, "Password must be at least 8 characters long."],
       required: function (this: IAdmin) {
-        return !this.passwordResetToken;
+        return !this.passwordResetToken && !this.googleId;
       },
     },
     googleId: { type: String, default: null },
