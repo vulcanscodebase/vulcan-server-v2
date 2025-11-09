@@ -1,0 +1,69 @@
+import { mergePermissions } from "../middlewares/adminMiddleware.js";
+import { Types } from "mongoose";
+import type { IAdmin } from "../models/Admin.js";
+import type { IPod } from "../models/Pod.js";
+
+/**
+ * Checks whether a requester (Admin or SuperAdmin) has access to a Pod.
+ * @param requester - The account object (Admin)
+ * @param pod - The Pod document
+ * @returns boolean - true if access is granted, false otherwise
+ */
+export const hasPodAccess = (requester: IAdmin | any, pod: IPod): boolean => {
+  if (!requester || !requester._id || !pod || !pod.createdBy) {
+    console.warn("❌ hasPodAccess: Missing requester or pod.createdBy", {
+      requesterExists: !!requester,
+      requesterId: requester?._id,
+      podExists: !!pod,
+      createdBy: pod?.createdBy,
+    });
+    return false;
+  }
+
+  const requesterId = requester._id.toString();
+  const creatorId =
+    typeof pod.createdBy === "object"
+      ? (pod.createdBy._id as Types.ObjectId)?.toString()
+      : String(pod.createdBy);
+
+  console.log("🔍 Checking pod access:", {
+    requesterId,
+    creatorId,
+    isSuperAdmin: requester.isSuperAdmin,
+  });
+
+  // ✅ Super Admin override
+  if (requester.isSuperAdmin) {
+    console.log("✅ Super Admin override");
+    return true;
+  }
+
+  // ✅ Pod Creator access
+  if (creatorId === requesterId) {
+    console.log("✅ Pod Creator match");
+    return true;
+  }
+
+  // ✅ Role-based permission check
+  const permissions = mergePermissions(requester);
+  const hasGroupViewPermission =
+    permissions.has("Groups") && permissions.get("Groups")!.has("view");
+
+  console.log(
+    "🔍 Merged Permissions Map:",
+    Object.fromEntries(
+      Array.from(permissions.entries()).map(([feature, actions]) => [
+        feature,
+        Array.from(actions),
+      ])
+    )
+  );
+
+  if (hasGroupViewPermission) {
+    console.log("✅ Permission-based access: Groups:view");
+    return true;
+  }
+
+  console.warn("❌ Access denied by hasPodAccess");
+  return false;
+};

@@ -18,6 +18,8 @@ import adminRoutes from "./routes/adminRoutes.js";
 
 import { initializeSuperAdmin } from "./utils/initializeSuperAdmin.js";
 import connectDB from "./config/db.js";
+import path from "path";
+import podRoutes from "./routes/podRoutes.js";
 
 dotenv.config();
 
@@ -97,9 +99,13 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
+// ✅ Serve uploaded files statically
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 // ✅ Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/pods", podRoutes);
 
 // ✅ Health and Root routes
 app.get("/", (_req: Request, res: Response) => {

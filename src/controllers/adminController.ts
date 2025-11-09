@@ -55,7 +55,6 @@ export const loginAdmin = async (
   res: Response
 ): Promise<void> => {
   const { email, password } = req.body;
-  console.log("hello");
 
   try {
     console.log("🔍 Checking email:", email);
@@ -69,6 +68,7 @@ export const loginAdmin = async (
       res.status(404).json({ message: "Admin not found" });
       return;
     }
+    console.log(admin);
 
     if (!password) {
       console.warn("⚠️ No password provided in request body");
@@ -87,8 +87,18 @@ export const loginAdmin = async (
     console.log("🔍 Fetched admin._id:", admin._id);
     console.log("🔑 Stored hashed password:", admin.password);
 
+    console.log("Password from client:", JSON.stringify(password));
+    console.log(
+      "Password in .env:",
+      JSON.stringify(process.env.SUPER_ADMIN_PASSWORD)
+    );
+
     const isPasswordValid = await bcrypt.compare(password, admin.password);
     console.log("🔍 Password comparison result:", isPasswordValid);
+    console.log(
+      "Manual check:",
+      await bcrypt.compare("Admin@123", admin.password)
+    );
 
     if (!isPasswordValid) {
       console.log("❌ Invalid password for email:", email);
