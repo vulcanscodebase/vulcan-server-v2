@@ -44,7 +44,7 @@ export const protect = async (
       process.env.JWT_SECRET as string
     ) as jwt.JwtPayload;
 
-    const userId = decoded.userId;
+    const userId = decoded.id as string;
     if (!userId)
       return sendErrorResponse(
         res,
