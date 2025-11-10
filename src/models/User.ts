@@ -72,7 +72,13 @@ const userSchema = new Schema<IUser>(
       },
       minlength: [8, "Password must be at least 8 characters long."],
     },
-    googleId: { type: String, default: null, unique: true, sparse: true },
+    googleId: {
+      type: String,
+      default: null,
+      unique: true,
+      partialFilterExpression: { googleId: { $type: "string" } },
+      sparse: true,
+    },
     profilePhoto: { type: String, default: null },
     googleRefreshToken: { type: String, default: null },
     educationStatus: {

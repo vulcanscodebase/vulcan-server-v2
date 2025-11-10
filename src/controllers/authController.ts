@@ -355,7 +355,7 @@ export const resetPassword = async (req: AuthRequest, res: Response) => {
 };
 
 export const changePassword = async (req: AuthRequest, res: Response) => {
-  const { oldPassword, newPassword } = req.body;
+  const { currentPassword, newPassword } = req.body;
 
   try {
     // Ensure user is authenticated
@@ -367,7 +367,7 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     }
 
     // Validate input
-    if (!oldPassword || !newPassword) {
+    if (!currentPassword || !newPassword) {
       return res
         .status(400)
         .json({ message: "Both old and new passwords are required." });
@@ -386,7 +386,7 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
 
     // Verify the old password
     const isPasswordValid = await bcrypt.compare(
-      oldPassword,
+      currentPassword,
       user.password || ""
     );
     if (!isPasswordValid) {
@@ -394,10 +394,10 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     }
 
     // Hash the new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    // const hashedNewPassword = await bcrypt.hash(newPassword, 10);
 
     // Update the user's password
-    user.password = hashedNewPassword;
+    user.password = newPassword;
     await user.save();
 
     res.status(200).json({ message: "Password changed successfully." });
