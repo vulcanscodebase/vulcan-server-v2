@@ -393,9 +393,6 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: "Old password is incorrect." });
     }
 
-    // Hash the new password
-    // const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-
     // Update the user's password
     user.password = newPassword;
     await user.save();
