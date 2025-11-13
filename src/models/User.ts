@@ -1,6 +1,12 @@
 import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
+import {
+  type EducationStatus,
+  type Profession,
+  EDUCATION_STATUSES,
+  PROFESSIONS,
+} from "../constants/enums.js";
 
 export interface IUser extends Document {
   name: string;
@@ -10,20 +16,9 @@ export interface IUser extends Document {
   googleId?: string | null;
   profilePhoto?: string | null;
   googleRefreshToken?: string | null;
-  educationStatus?:
-    | "10th or below"
-    | "11th-12th or diploma"
-    | "Undergrad"
-    | "Grad"
-    | "Post Grad"
-    | null;
+  educationStatus?: EducationStatus | null;
   schoolOrCollege?: string | null;
-  profession?:
-    | "Student"
-    | "IT Profession"
-    | "Job Seeker"
-    | "Aspirant Studying Abroad"
-    | null;
+  profession?: Profession | null;
   organization?: string | null;
   qualification?: string | null;
   purchasedTests?: mongoose.Types.ObjectId[];
@@ -83,24 +78,13 @@ const userSchema = new Schema<IUser>(
     googleRefreshToken: { type: String, default: null },
     educationStatus: {
       type: String,
-      enum: [
-        "10th or below",
-        "11th-12th or diploma",
-        "Undergrad",
-        "Grad",
-        "Post Grad",
-      ],
+      enum: EDUCATION_STATUSES,
       default: null,
     },
     schoolOrCollege: { type: String, trim: true, default: null },
     profession: {
       type: String,
-      enum: [
-        "Student",
-        "IT Profession",
-        "Job Seeker",
-        "Aspirant Studying Abroad",
-      ],
+      enum: PROFESSIONS,
       default: null,
     },
     organization: { type: String, default: null },

@@ -1,4 +1,8 @@
 import mongoose, { Schema, Document, Types } from "mongoose";
+import {
+  type EducationStatus,
+  EDUCATION_STATUSES,
+} from "../constants/enums.js";
 
 export interface IInvitedUser {
   email: string;
@@ -18,7 +22,7 @@ export interface IPod extends Document {
   name: string;
   type: "institution" | "organization" | "private";
   institutionName?: string | null;
-  educationStatus?: string | null;
+  educationStatus?: EducationStatus | null;
   organizationName?: string | null;
   associatedEmail?: string | null;
   managedBy?: Types.ObjectId | null;
@@ -33,6 +37,11 @@ export interface IPod extends Document {
   tags?: string[];
   assignedTests?: Types.ObjectId[];
   assignedCourses?: Types.ObjectId[];
+  // Nested pod fields
+  parentPodId?: Types.ObjectId | null;
+  nestingLevel?: number;
+  childPods?: Types.ObjectId[];
+  path?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,7 +56,11 @@ const podSchema = new Schema<IPod>(
     },
     institutionName: { type: String, default: null },
     organizationName: { type: String, default: null },
-    educationStatus: { type: String, default: null },
+    educationStatus: {
+      type: String,
+      enum: EDUCATION_STATUSES,
+      default: null,
+    },
     associatedEmail: { type: String, default: null },
     managedBy: { type: Schema.Types.ObjectId, ref: "Admin", default: null },
     invitedUsers: [
@@ -79,6 +92,11 @@ const podSchema = new Schema<IPod>(
     tags: { type: [String], default: [] },
     assignedTests: [{ type: Schema.Types.ObjectId, ref: "Test" }],
     assignedCourses: [{ type: Schema.Types.ObjectId, ref: "Course" }],
+    // Nested pod fields
+    parentPodId: { type: Schema.Types.ObjectId, ref: "Pod", default: null },
+    nestingLevel: { type: Number, default: 0 },
+    childPods: [{ type: Schema.Types.ObjectId, ref: "Pod" }],
+    path: { type: String, default: null },
   },
   { timestamps: true }
 );
@@ -86,5 +104,10 @@ const podSchema = new Schema<IPod>(
 podSchema.index({ name: 1 });
 podSchema.index({ createdBy: 1 });
 podSchema.index({ type: 1 });
+// Nested pod indexes
+podSchema.index({ parentPodId: 1 });
+podSchema.index({ nestingLevel: 1 });
+podSchema.index({ path: 1 });
+podSchema.index({ parentPodId: 1, nestingLevel: 1 });
 
 export const Pod = mongoose.model<IPod>("Pod", podSchema);

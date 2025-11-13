@@ -5,9 +5,11 @@ import {
   createPod,
   getAllPods,
   getPodById,
+  getPodHierarchy,
+  getPodsByParent,
   uploadPodUsersExcel,
   processPodExcelPreview,
-  //   bulkAddPodUsers,
+  bulkAddPodUsers,
   //   getPodInviteStatus,
   //   resendPodInvites,
   //   getInviteStatusByPod,
@@ -58,6 +60,21 @@ router.get(
   requirePermission("Groups", "view") as RequestHandler,
   getPodById as RequestHandler
 );
+
+// ✅ Nested Pod Hierarchy
+router.get(
+  "/:podId/hierarchy",
+  requirePermission("Groups", "view") as RequestHandler,
+  getPodHierarchy as RequestHandler
+);
+
+// ✅ Get Pods by Parent (filter by parentPodId)
+router.get(
+  "/filter/by-parent/:parentPodId",
+  requirePermission("Groups", "view") as RequestHandler,
+  getPodsByParent as RequestHandler
+);
+
 // router.get(
 //   "/:podId/users",
 //   requirePermission("Groups", "view") as RequestHandler,
@@ -79,12 +96,12 @@ router.post(
   processPodExcelPreview as RequestHandler
 );
 
-// // ✅ Bulk Add Users
-// router.post(
-//   "/:podId/bulk-add",
-//   requirePermission("Groups", "edit") as RequestHandler,
-//   bulkAddPodUsers as RequestHandler
-// );
+// ✅ Bulk Add Users
+router.post(
+  "/:podId/bulk-add",
+  requirePermission("Groups", "edit") as RequestHandler,
+  bulkAddPodUsers as RequestHandler
+);
 
 // // ✅ Add Single User
 // router.post(
