@@ -7,24 +7,24 @@ import {
   getPodById,
   getPodHierarchy,
   getPodsByParent,
+  getPodUsers,
   uploadPodUsersExcel,
   processPodExcelPreview,
   bulkAddPodUsers,
-  //   getPodInviteStatus,
+  getPodInviteStatus,
   //   resendPodInvites,
   //   getInviteStatusByPod,
-  //   removePodUser,
-  //   getPodUsers,
-  //   addSingleUserToPod,
+  removePodUser,
+  addSingleUserToPod,
   //   transferPodAdmin,
-  //   softDeletePod,
+  softDeletePod,
+  restorePod,
   //   updatePodTags,
   //   searchPodUsers,
-  //   restorePod,
   //   exportPodUsersToExcel,
   //   togglePodArchiveStatus,
   //   clonePod,
-  //   getPodAnalytics,
+  getPodAnalytics,
   //   permanentlyDeletePod,
 } from "../controllers/podController.js";
 
@@ -75,11 +75,11 @@ router.get(
   getPodsByParent as RequestHandler
 );
 
-// router.get(
-//   "/:podId/users",
-//   requirePermission("Groups", "view") as RequestHandler,
-//   getPodUsers as RequestHandler
-// );
+router.get(
+  "/:podId/users",
+  requirePermission("Groups", "view") as RequestHandler,
+  getPodUsers as RequestHandler
+);
 
 // ✅ Upload Excel & Preview (Local)
 router.post(
@@ -103,36 +103,38 @@ router.post(
   bulkAddPodUsers as RequestHandler
 );
 
-// // ✅ Add Single User
-// router.post(
-//   "/:podId/add-user",
-//   requirePermission("Groups", "edit") as RequestHandler,
-//   [
-//     body("email").isEmail().withMessage("Valid email is required."),
-//     body("name").notEmpty().withMessage("Name is required."),
-//   ],
-//   validateRequest as RequestHandler,
-//   addSingleUserToPod as RequestHandler
-// );
+// ✅ Add Single User
+router.post(
+  "/:podId/add-user",
+  requirePermission("Groups", "edit") as RequestHandler,
+  [
+    body("email").isEmail().withMessage("Valid email is required."),
+    body("name").notEmpty().withMessage("Name is required."),
+  ],
+  validateRequest as RequestHandler,
+  addSingleUserToPod as RequestHandler
+);
 
-// // ✅ Remove User
-// router.delete(
-//   "/:podId/users/:userId",
-//   requirePermission("Groups", "edit") as RequestHandler,
-//   removePodUser as RequestHandler
-// );
+// ✅ Remove User
+router.delete(
+  "/:podId/users/:userId",
+  requirePermission("Groups", "edit") as RequestHandler,
+  removePodUser as RequestHandler
+);
 
 // // ✅ Invite Status & Resend
-// router.get(
-//   "/:podId/invite-status",
-//   requirePermission("Groups", "view") as RequestHandler,
-//   getPodInviteStatus as RequestHandler
-// );
+router.get(
+  "/:podId/invite-status",
+  requirePermission("Groups", "view") as RequestHandler,
+  getPodInviteStatus as RequestHandler
+);
+
 // router.get(
 //   "/:podId/invite-summary",
 //   requirePermission("Groups", "view") as RequestHandler,
 //   getInviteStatusByPod as RequestHandler
 // );
+
 // router.post(
 //   "/:podId/resend-invites",
 //   requirePermission("Groups", "edit") as RequestHandler,
@@ -146,17 +148,18 @@ router.post(
 //   transferPodAdmin as RequestHandler
 // );
 
-// // ✅ Soft Delete / Restore / Permanent Delete
-// router.delete(
-//   "/:podId/soft-delete",
-//   requirePermission("Groups", "edit") as RequestHandler,
-//   softDeletePod as RequestHandler
-// );
-// router.patch(
-//   "/:podId/restore",
-//   requirePermission("Groups", "edit") as RequestHandler,
-//   restorePod as RequestHandler
-// );
+// ✅ Soft Delete / Restore / Permanent Delete
+router.delete(
+  "/:podId/soft-delete",
+  requirePermission("Groups", "edit") as RequestHandler,
+  softDeletePod as RequestHandler
+);
+router.patch(
+  "/:podId/restore",
+  requirePermission("Groups", "edit") as RequestHandler,
+  restorePod as RequestHandler
+);
+
 // router.delete(
 //   "/:podId/permanent-delete",
 //   requirePermission("Groups", "delete") as RequestHandler,
@@ -185,11 +188,11 @@ router.post(
 // );
 
 // // ✅ Analytics
-// router.get(
-//   "/:podId/analytics",
-//   requirePermission("Groups", "view") as RequestHandler,
-//   getPodAnalytics as RequestHandler
-// );
+router.get(
+  "/:podId/analytics",
+  requirePermission("Groups", "view") as RequestHandler,
+  getPodAnalytics as RequestHandler
+);
 
 // // ✅ Archive / Unarchive
 // router.patch(
