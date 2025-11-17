@@ -47,29 +47,15 @@ export const hasPodAccess = (requester: IAdmin | any, pod: IPod): boolean => {
     return true;
   }
 
-  // ✅ Check if requester is admin of parent pod (nested pod inheritance)
-  if (pod.parentPodId && requester._id === pod.parentPodId) {
-    console.log("✅ Admin of parent pod - inherited access");
+  // ✅ Check if requester is the managing admin
+  if (pod.managedBy && requester._id.toString() === pod.managedBy.toString()) {
+    console.log("✅ Managing admin access");
     return true;
   }
 
-  // ✅ Role-based permission check
-  const permissions = mergePermissions(requester);
-  const hasGroupViewPermission =
-    permissions.has("Groups") && permissions.get("Groups")!.has("view");
-
-  console.log(
-    "🔍 Merged Permissions Map:",
-    Object.fromEntries(
-      Array.from(permissions.entries()).map(([feature, actions]) => [
-        feature,
-        Array.from(actions),
-      ])
-    )
-  );
-
-  if (hasGroupViewPermission) {
-    console.log("✅ Permission-based access: Groups:view");
+  // ✅ Check if requester is admin of parent pod (nested pod inheritance)
+  if (pod.parentPodId && requester._id === pod.parentPodId) {
+    console.log("✅ Admin of parent pod - inherited access");
     return true;
   }
 

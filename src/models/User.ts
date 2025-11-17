@@ -21,6 +21,8 @@ export interface IUser extends Document {
   profession?: Profession | null;
   organization?: string | null;
   qualification?: string | null;
+  uniqueId?: string | null;
+  licenses?: number;
   purchasedTests?: mongoose.Types.ObjectId[];
   purchasedCourses?: mongoose.Types.ObjectId[];
   reportCards?: mongoose.Types.ObjectId[];
@@ -70,8 +72,6 @@ const userSchema = new Schema<IUser>(
     googleId: {
       type: String,
       default: null,
-      unique: true,
-      partialFilterExpression: { googleId: { $type: "string" } },
       sparse: true,
     },
     profilePhoto: { type: String, default: null },
@@ -89,6 +89,8 @@ const userSchema = new Schema<IUser>(
     },
     organization: { type: String, default: null },
     qualification: { type: String, default: null },
+    uniqueId: { type: String, default: null, trim: true },
+    licenses: { type: Number, default: 0 },
     purchasedTests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
     purchasedCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
     reportCards: [{ type: mongoose.Schema.Types.ObjectId, ref: "Report" }],

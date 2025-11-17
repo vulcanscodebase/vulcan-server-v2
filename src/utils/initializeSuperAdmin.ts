@@ -46,14 +46,11 @@ export const initializeSuperAdmin = async (): Promise<void> => {
       console.log("✅ 'super-admin' role created.");
     }
 
-    // ✅ Hash password before saving
-    const hashedPassword = await bcrypt.hash(superAdminPassword, 12);
-
     // ✅ Create Super Admin
     const superAdmin = await Admin.create({
       name: "Super Admin",
       email: superAdminEmail,
-      password: hashedPassword,
+      password: superAdminPassword,
       isSuperAdmin: true,
       role: superAdminRole._id,
       canCreateUser: true,

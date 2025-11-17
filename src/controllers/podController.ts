@@ -153,7 +153,12 @@ export const createPod = async (req: Request, res: Response): Promise<void> => {
       if (!roleData) {
         roleData = await Role.create({
           name: desiredRoleName,
-          defaultPermissions: [{ feature: "Groups", actions: ["view"] }],
+          defaultPermissions: [
+            {
+              feature: "Groups",
+              actions: ["view", "edit", "delete", "create", "publish"],
+            },
+          ],
           createdBy: creator._id,
         });
       }
@@ -470,6 +475,8 @@ export const uploadPodUsersExcel = async (
     const { podId } = req.params;
     const requester = req.account;
 
+    console.log(req, req.params, req.file);
+
     if (!req.file?.buffer) {
       res.status(400).json({ message: "Excel file is required." });
       return;
@@ -504,16 +511,16 @@ export const uploadPodUsersExcel = async (
     worksheet?.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
       const name = extractCellValue(row.getCell("A"));
-      const email = extractCellValue(row.getCell("B")).toLowerCase();
-      const qualification = extractCellValue(row.getCell("C"));
-      const dobRaw = row.getCell("D").value;
-      const dob =
-        typeof dobRaw === "string" ||
-        typeof dobRaw === "number" ||
-        dobRaw instanceof Date
-          ? new Date(dobRaw)
-          : null;
-      if (email) rows.push({ name, email, qualification, dob });
+      const uniqueId = extractCellValue(row.getCell("B"));
+      const email = extractCellValue(row.getCell("C")).toLowerCase();
+      const licensesRaw = row.getCell("D").value;
+      const licenses =
+        typeof licensesRaw === "number"
+          ? licensesRaw
+          : typeof licensesRaw === "string"
+          ? parseInt(licensesRaw, 10) || 0
+          : 0;
+      if (email) rows.push({ name, uniqueId, email, licenses });
     });
 
     const newUsers: any[] = [];
@@ -531,8 +538,8 @@ export const uploadPodUsersExcel = async (
       const baseUser = {
         email,
         name: pod.type !== "private" ? row.name : undefined,
-        qualification: pod.type !== "private" ? row.qualification : undefined,
-        dob: pod.type !== "private" ? row.dob : undefined,
+        uniqueId: row.uniqueId || null,
+        licenses: row.licenses || 0,
       };
 
       exists ? existingUsers.push(baseUser) : newUsers.push(baseUser);
@@ -600,16 +607,16 @@ export const processPodExcelPreview = async (
     worksheet?.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
       const name = extractCellValue(row.getCell("A"));
-      const email = extractCellValue(row.getCell("B")).toLowerCase();
-      const qualification = extractCellValue(row.getCell("C"));
-      const dobRaw = row.getCell("D").value;
-      const dob =
-        typeof dobRaw === "string" ||
-        typeof dobRaw === "number" ||
-        dobRaw instanceof Date
-          ? new Date(dobRaw)
-          : null;
-      if (email) rows.push({ name, email, qualification, dob });
+      const uniqueId = extractCellValue(row.getCell("B"));
+      const email = extractCellValue(row.getCell("C")).toLowerCase();
+      const licensesRaw = row.getCell("D").value;
+      const licenses =
+        typeof licensesRaw === "number"
+          ? licensesRaw
+          : typeof licensesRaw === "string"
+          ? parseInt(licensesRaw, 10) || 0
+          : 0;
+      if (email) rows.push({ name, uniqueId, email, licenses });
     });
 
     const validEmails = rows
@@ -682,6 +689,8 @@ export const bulkAddPodUsers = async (
             pod.type !== "private" ? user.qualification : undefined,
           dob:
             pod.type !== "private" && user.dob ? new Date(user.dob) : undefined,
+          uniqueId: user.uniqueId || null,
+          licenses: user.licenses || 0,
           profession,
           schoolOrCollege:
             pod.type === "institution" ? pod.institutionName : undefined,
@@ -728,6 +737,14 @@ export const bulkAddPodUsers = async (
             existing.educationStatus = pod.educationStatus;
           }
           existing.profileLocked = true;
+        }
+
+        if (user.uniqueId) {
+          existing.uniqueId = user.uniqueId;
+        }
+
+        if (user.licenses) {
+          existing.licenses = user.licenses;
         }
 
         await existing.save();
@@ -785,7 +802,7 @@ export const addSingleUserToPod = async (
 ): Promise<void> => {
   try {
     const { podId } = req.params;
-    const { name, email, qualification, dob } = req.body;
+    const { name, email, qualification, dob, uniqueId, licenses } = req.body;
     const requester = req.account;
 
     if (!email || !validator.isEmail(email)) {
@@ -825,6 +842,8 @@ export const addSingleUserToPod = async (
       name: pod.type === "private" ? "Pending Registration" : name,
       qualification: pod.type !== "private" ? qualification : undefined,
       dob: pod.type !== "private" && dob ? new Date(dob) : undefined,
+      uniqueId: uniqueId || null,
+      licenses: licenses || 0,
       profession,
       schoolOrCollege:
         pod.type === "institution" ? pod.institutionName : undefined,
@@ -858,6 +877,13 @@ export const addSingleUserToPod = async (
     } else {
       if (profileLocked && user) {
         Object.assign(user, userDetails);
+        await user.save();
+      } else if (user && licenses) {
+        // Update licenses even for private pods
+        user.licenses = licenses;
+        if (uniqueId) {
+          user.uniqueId = uniqueId;
+        }
         await user.save();
       }
 
@@ -1175,8 +1201,9 @@ export const getPodAnalytics = async (
       return;
     }
 
-    const userIds = (pod.invitedUsers.map((invite) => invite.userId) as any[])
-      .filter(Boolean);
+    const userIds = (
+      pod.invitedUsers.map((invite) => invite.userId) as any[]
+    ).filter(Boolean);
 
     const totalUsers = userIds.length;
     const verifiedUsers = userIds.filter((user) => user.verified).length;

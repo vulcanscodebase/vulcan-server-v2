@@ -80,6 +80,7 @@ export const uploadExcelFile = (
     }
 
     try {
+      console.log("Excel file uploaded.");
       // await streamFileToS3(req, req.file!, "pod-uploads/");
       next();
     } catch (error) {
