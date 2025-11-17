@@ -1,6 +1,12 @@
 import mongoose, { Document, Schema } from "mongoose";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
+import {
+  type EducationStatus,
+  type Profession,
+  EDUCATION_STATUSES,
+  PROFESSIONS,
+} from "../constants/enums.js";
 
 export interface IUser extends Document {
   name: string;
@@ -10,22 +16,13 @@ export interface IUser extends Document {
   googleId?: string | null;
   profilePhoto?: string | null;
   googleRefreshToken?: string | null;
-  educationStatus?:
-    | "10th or below"
-    | "11th-12th or diploma"
-    | "Undergrad"
-    | "Grad"
-    | "Post Grad"
-    | null;
+  educationStatus?: EducationStatus | null;
   schoolOrCollege?: string | null;
-  profession?:
-    | "Student"
-    | "IT Profession"
-    | "Job Seeker"
-    | "Aspirant Studying Abroad"
-    | null;
+  profession?: Profession | null;
   organization?: string | null;
   qualification?: string | null;
+  uniqueId?: string | null;
+  licenses?: number;
   purchasedTests?: mongoose.Types.ObjectId[];
   purchasedCourses?: mongoose.Types.ObjectId[];
   reportCards?: mongoose.Types.ObjectId[];
@@ -75,36 +72,25 @@ const userSchema = new Schema<IUser>(
     googleId: {
       type: String,
       default: null,
-      unique: true,
-      partialFilterExpression: { googleId: { $type: "string" } },
       sparse: true,
     },
     profilePhoto: { type: String, default: null },
     googleRefreshToken: { type: String, default: null },
     educationStatus: {
       type: String,
-      enum: [
-        "10th or below",
-        "11th-12th or diploma",
-        "Undergrad",
-        "Grad",
-        "Post Grad",
-      ],
+      enum: EDUCATION_STATUSES,
       default: null,
     },
     schoolOrCollege: { type: String, trim: true, default: null },
     profession: {
       type: String,
-      enum: [
-        "Student",
-        "IT Profession",
-        "Job Seeker",
-        "Aspirant Studying Abroad",
-      ],
+      enum: PROFESSIONS,
       default: null,
     },
     organization: { type: String, default: null },
     qualification: { type: String, default: null },
+    uniqueId: { type: String, default: null, trim: true },
+    licenses: { type: Number, default: 0 },
     purchasedTests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
     purchasedCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Course" }],
     reportCards: [{ type: mongoose.Schema.Types.ObjectId, ref: "Report" }],
