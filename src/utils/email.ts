@@ -82,7 +82,10 @@ export const sendPasswordSetupEmail = async (
   email: string,
   setupToken: string
 ) => {
-  const setupUrl = `${process.env.ADMIN_URL}/setup-password?token=${setupToken}`;
+  // Use ADMIN_URL if set, otherwise default to localhost:3001 (admin frontend)
+  // Don't fall back to FRONTEND_URL as that's for the user frontend (port 3000)
+  const adminBaseUrl = process.env.ADMIN_URL || "http://localhost:3001";
+  const setupUrl = `${adminBaseUrl}/setup-password?token=${setupToken}`;
   const text = `Hello ${name},\n\nYou have been added as an admin. Please set up your password using the link below:\n\n${setupUrl}\n\nThis link expires in 24 hours.\n\nThank you.`;
 
   await sendEmail(email, "Set Up Your Admin Account", text);

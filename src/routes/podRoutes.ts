@@ -25,7 +25,7 @@ import {
   //   togglePodArchiveStatus,
   //   clonePod,
   getPodAnalytics,
-  //   permanentlyDeletePod,
+  permanentlyDeletePod,
 } from "../controllers/podController.js";
 
 import { protect } from "../middlewares/authMiddleware.js";
@@ -159,12 +159,11 @@ router.patch(
   requirePermission("Groups", "edit") as RequestHandler,
   restorePod as RequestHandler
 );
-
-// router.delete(
-//   "/:podId/permanent-delete",
-//   requirePermission("Groups", "delete") as RequestHandler,
-//   permanentlyDeletePod as RequestHandler
-// );
+router.delete(
+  "/:podId/permanent-delete",
+  requirePermission("Groups", "delete") as RequestHandler,
+  permanentlyDeletePod as RequestHandler
+);
 
 // // ✅ Update Tags
 // router.put(
