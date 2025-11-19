@@ -163,6 +163,7 @@ Create a `.env` file in the project root:
 PORT=5000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
+ADMIN_URL=http://localhost:3001
 BACKEND_URL=http://localhost:5000
 
 # DATABASE (MongoDB)

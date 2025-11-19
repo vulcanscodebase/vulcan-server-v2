@@ -217,6 +217,8 @@ export const createPod = async (req: Request, res: Response): Promise<void> => {
  * @desc Get all Pods
  * @route GET /api/pods/all
  * @access Admin / SuperAdmin
+ * @description For regular admins, returns only pods they manage/created + all child pods recursively
+ *              For super admins, returns all pods
  */
 export const getAllPods = async (
   req: Request,
@@ -237,9 +239,74 @@ export const getAllPods = async (
     if (tag) query.tags = tag;
     if (includeDeleted !== "true") query.isDeleted = false;
 
-    const pods = await Pod.find(query)
-      .populate("createdBy", "name email")
-      .sort({ createdAt: -1 });
+    let pods: any[] = [];
+
+    // If not super admin, only show pods they manage or created + child pods
+    if (!requester.isSuperAdmin) {
+      // Get root pods where this admin is the manager or creator
+      const rootPodsQuery: any = {
+        $or: [
+          { managedBy: requester._id },
+          { createdBy: requester._id },
+        ],
+        isDeleted: false,
+        parentPodId: null, // Only root pods
+      };
+
+      if (type && ["institution", "organization", "private"].includes(type as string)) {
+        rootPodsQuery.type = type;
+      }
+
+      const rootPods = await Pod.find(rootPodsQuery)
+        .populate("createdBy", "name email")
+        .populate("managedBy", "name email")
+        .populate("parentPodId", "name")
+        .sort({ createdAt: -1 });
+
+      // Get all child pods of root pods (recursively)
+      if (rootPods.length > 0) {
+        const rootPodIds = rootPods.map((p) => p._id as mongoose.Types.ObjectId);
+        
+        // Recursively get all child pods
+        const getChildPodsRecursive = async (parentIds: mongoose.Types.ObjectId[]): Promise<any[]> => {
+          if (parentIds.length === 0) return [];
+          
+          const childQuery: any = {
+            parentPodId: { $in: parentIds },
+            isDeleted: false,
+          };
+          if (type && ["institution", "organization", "private"].includes(type as string)) {
+            childQuery.type = type;
+          }
+
+          const childPods = await Pod.find(childQuery)
+            .populate("createdBy", "name email")
+            .populate("managedBy", "name email")
+            .populate("parentPodId", "name type")
+            .sort({ createdAt: -1 });
+
+          const childPodIds = childPods.map((p) => p._id as mongoose.Types.ObjectId);
+
+          // Recursively get children of children
+          if (childPods.length > 0) {
+            const nestedChildren = await getChildPodsRecursive(childPodIds);
+            return [...childPods, ...nestedChildren];
+          }
+
+          return childPods;
+        };
+
+        const childPods = await getChildPodsRecursive(rootPodIds);
+        pods = [...rootPods, ...childPods];
+      }
+    } else {
+      // Super admin sees all pods
+      pods = await Pod.find(query)
+        .populate("createdBy", "name email")
+        .populate("managedBy", "name email")
+        .populate("parentPodId", "name")
+        .sort({ createdAt: -1 });
+    }
 
     res.status(200).json({ pods });
   } catch (error) {
@@ -996,6 +1063,7 @@ export const removePodUser = async (
  * @desc Soft Delete a Pod
  * @route DELETE /api/pods/:podId
  * @access Private (Super Admin or Pod Creator)
+ * @description Soft deletes the pod and recursively soft deletes all child pods
  */
 export const softDeletePod = async (
   req: Request,
@@ -1028,20 +1096,67 @@ export const softDeletePod = async (
       return;
     }
 
+    // Recursively find and soft delete all child pods
+    const softDeleteChildPodsRecursive = async (
+      parentId: mongoose.Types.ObjectId
+    ): Promise<number> => {
+      // Find all direct child pods that are not already deleted
+      const childPods = await Pod.find({
+        parentPodId: parentId,
+        isDeleted: false,
+      });
+
+      let deletedCount = 0;
+
+      // Soft delete each child pod
+      for (const childPod of childPods) {
+        childPod.isDeleted = true;
+        childPod.deletedAt = new Date();
+        await childPod.save();
+
+        // Recursively delete children of this child
+        const nestedCount = await softDeleteChildPodsRecursive(
+          childPod._id as mongoose.Types.ObjectId
+        );
+
+        deletedCount += 1 + nestedCount; // Count this child + its children
+
+        await logPodActivity(
+          childPod._id as mongoose.Types.ObjectId,
+          "soft-delete",
+          `Child pod was soft-deleted along with parent pod "${pod.name}" by ${requester.email}`,
+          requester._id as mongoose.Types.ObjectId
+        );
+      }
+
+      return deletedCount;
+    };
+
+    // Soft delete the parent pod
     pod.isDeleted = true;
     pod.deletedAt = new Date();
     await pod.save();
 
-    console.log(`✅ Pod '${pod.name}' soft deleted.`);
+    // Recursively soft delete all child pods
+    const childPodsDeletedCount = await softDeleteChildPodsRecursive(
+      pod._id as mongoose.Types.ObjectId
+    );
+
+    console.log(
+      `✅ Pod '${pod.name}' soft deleted along with ${childPodsDeletedCount} child pod(s).`
+    );
 
     await logPodActivity(
       pod._id as mongoose.Types.ObjectId,
       "soft-delete",
-      `Pod was soft-deleted by ${requester.email}`,
+      `Pod was soft-deleted by ${requester.email}${childPodsDeletedCount > 0 ? ` along with ${childPodsDeletedCount} child pod(s)` : ""}`,
       requester._id as mongoose.Types.ObjectId
     );
 
-    res.status(200).json({ message: "Pod has been soft deleted." });
+    res.status(200).json({
+      message: `Pod has been soft deleted${childPodsDeletedCount > 0 ? ` along with ${childPodsDeletedCount} child pod(s)` : ""}.`,
+      deletedChildPodsCount: childPodsDeletedCount,
+    });
   } catch (error) {
     console.error("❌ Error during soft delete:", error);
     res
@@ -1150,6 +1265,17 @@ export const restorePod = async (
       return;
     }
 
+    // Check if this is a child pod and if its parent is still deleted
+    if (pod.parentPodId) {
+      const parentPod = await Pod.findById(pod.parentPodId);
+      if (parentPod && parentPod.isDeleted) {
+        res.status(400).json({
+          message: `Cannot restore child pod. Parent pod "${parentPod.name}" is still in the bin. Please restore the parent pod first.`,
+        });
+        return;
+      }
+    }
+
     pod.isDeleted = false;
     pod.deletedAt = null;
     await pod.save();
@@ -1166,6 +1292,72 @@ export const restorePod = async (
   } catch (error) {
     console.error("❌ Error restoring pod:", error);
     res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Permanently Delete a Pod (Hard Delete)
+ * @route DELETE /api/pods/:podId/permanent-delete
+ * @access Private (Super Admin only)
+ * @description Permanently removes the pod from the database. This action cannot be undone.
+ */
+export const permanentlyDeletePod = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { podId } = req.params;
+    const requester = req.account;
+
+    console.log(
+      `🗑️ ${requester.email} is attempting to permanently delete pod: ${podId}`
+    );
+
+    // Only super admins can permanently delete pods
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Only super admins can permanently delete pods.",
+      });
+      return;
+    }
+
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    // Check if pod has child pods
+    const childPods = await Pod.find({ parentPodId: podId, isDeleted: false });
+    if (childPods.length > 0) {
+      res.status(400).json({
+        message: `Cannot permanently delete pod. It has ${childPods.length} active child pod(s). Please delete or move child pods first.`,
+      });
+      return;
+    }
+
+    // Log the deletion before actually deleting
+    await logPodActivity(
+      pod._id as mongoose.Types.ObjectId,
+      "permanent-delete",
+      `Pod permanently deleted by ${requester.email}. Pod name: ${pod.name}`,
+      requester._id as mongoose.Types.ObjectId
+    );
+
+    // Permanently delete the pod
+    await Pod.findByIdAndDelete(podId);
+
+    console.log(`✅ Pod '${pod.name}' permanently deleted.`);
+
+    res.status(200).json({
+      message: "Pod has been permanently deleted.",
+      deletedPodId: podId,
+    });
+  } catch (error) {
+    console.error("❌ Error during permanent delete:", error);
+    res.status(500).json({
+      message: "Internal server error during permanent delete.",
+    });
   }
 };
 
