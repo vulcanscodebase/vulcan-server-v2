@@ -10,16 +10,18 @@ import { User } from "../models/User.js";
 
 dotenv.config();
 
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID! as string,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET! as string,
-      callbackURL:
-        process.env.GOOGLE_CALLBACK_URL ||
-        "http://localhost:5000/api/auth/google/callback",
-      scope: ["profile", "email"],
-    },
+// Only initialize Google OAuth strategy if credentials are provided
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID as string,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+        callbackURL:
+          process.env.GOOGLE_CALLBACK_URL ||
+          "http://localhost:5000/api/auth/google/callback",
+        scope: ["profile", "email"],
+      },
     async (
       accessToken: string,
       refreshToken: string,
@@ -88,7 +90,10 @@ passport.use(
       }
     }
   )
-);
+  );
+} else {
+  console.warn("⚠️  Google OAuth credentials not provided. Google OAuth authentication will be disabled.");
+}
 
 // ✅ Serialize and Deserialize user
 passport.serializeUser((user: any, done) => {
