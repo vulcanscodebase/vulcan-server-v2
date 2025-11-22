@@ -20,11 +20,13 @@ interface CompleteInterviewBody {
     overallFeedback?: string;
     metrics?: Record<string, unknown>;
   };
-  transcript?: {
-    questions?: Array<{ question: string; askedAt: Date }>;
-    answers?: Array<{ answer: string; answeredAt: Date }>;
-  };
-  audioUrl?: string;
+  questionsData?: Array<{
+    question: string;
+    questionNumber: number;
+    transcript: string;
+    metrics?: Record<string, unknown>;
+    audioURL?: string;
+  }>;
   metadata?: Record<string, unknown>;
 }
 
@@ -131,8 +133,7 @@ export const completeInterview = async (
     const {
       interviewId,
       report,
-      transcript,
-      audioUrl,
+      questionsData,
       metadata: customMetadata,
     } = req.body;
 
@@ -158,10 +159,7 @@ export const completeInterview = async (
     }
 
     // Verify interview status is still started or in_progress
-    if (
-      interview.status !== "started" &&
-      interview.status !== "in_progress"
-    ) {
+    if (interview.status !== "started" && interview.status !== "in_progress") {
       res.status(400).json({
         message: `Cannot complete interview with status: ${interview.status}`,
       });
@@ -192,8 +190,7 @@ export const completeInterview = async (
     interview.status = "completed";
     interview.completedAt = new Date();
     interview.report = report || null;
-    interview.transcript = transcript || null;
-    interview.audioUrl = audioUrl || null;
+    interview.questionsData = questionsData || null;
     interview.metadata = {
       ...interview.metadata,
       ...customMetadata,
@@ -207,7 +204,9 @@ export const completeInterview = async (
       amount: 1,
       reason: "Interview Attendance",
       interviewId: new mongoose.Types.ObjectId(interviewId),
-      description: `Interview completed for ${interview.jobRole || "general"} position`,
+      description: `Interview completed for ${
+        interview.jobRole || "general"
+      } position`,
       performedBy: null, // User initiated, not admin
       balanceBefore,
       balanceAfter,
@@ -285,7 +284,8 @@ export const getInterviewDetails = async (
 
     // Access control: User can only view their own interviews
     if (
-      interview.userId.toString() !== (requester._id || requester.id).toString() &&
+      interview.userId.toString() !==
+        (requester._id || requester.id).toString() &&
       requester.role !== "admin" &&
       !requester.isSuperAdmin
     ) {
@@ -402,7 +402,9 @@ export const abandonInterview = async (
     }
 
     // Verify interview belongs to the user
-    if (interview.userId.toString() !== (requester._id || requester.id).toString()) {
+    if (
+      interview.userId.toString() !== (requester._id || requester.id).toString()
+    ) {
       res.status(403).json({
         message: "You do not have permission to abandon this interview.",
       });

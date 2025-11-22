@@ -14,18 +14,13 @@ export interface IInterview extends Document {
     overallFeedback?: string;
     metrics?: Record<string, unknown>;
   } | null;
-  audioUrl?: string | null; // URL to recorded audio/video
-  transcript?: {
-    // Interview transcript
-    questions?: Array<{
-      question: string;
-      askedAt: Date;
-    }>;
-    answers?: Array<{
-      answer: string;
-      answeredAt: Date;
-    }>;
-  } | null;
+  questionsData?: Array<{
+    question: string;
+    questionNumber: number;
+    transcript: string;
+    metrics?: Record<string, unknown>;
+    audioURL?: string;
+  }> | null;
   resume?: {
     // Resume information
     text?: string;
@@ -75,26 +70,16 @@ const interviewSchema = new Schema<IInterview>(
       },
       default: null,
     },
-    audioUrl: {
-      type: String,
-      default: null,
-      trim: true,
-    },
-    transcript: {
-      type: {
-        questions: [
-          {
-            question: String,
-            askedAt: { type: Date, default: Date.now },
-          },
-        ],
-        answers: [
-          {
-            answer: String,
-            answeredAt: { type: Date, default: Date.now },
-          },
-        ],
-      },
+    questionsData: {
+      type: [
+        {
+          question: String,
+          questionNumber: Number,
+          transcript: String,
+          metrics: Schema.Types.Mixed,
+          audioURL: String,
+        },
+      ],
       default: null,
     },
     resume: {
