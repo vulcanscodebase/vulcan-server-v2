@@ -1,0 +1,504 @@
+import { type Request, type Response } from "express";
+import mongoose from "mongoose";
+import { Interview, type IInterview } from "../models/Interview.js";
+import { User, type IUser } from "../models/User.js";
+import { Transaction, type ITransaction } from "../models/Transaction.js";
+
+interface StartInterviewBody {
+  jobRole?: string;
+  resumeText?: string;
+  resumeFileName?: string;
+  resumeEvaluation?: Record<string, unknown>;
+}
+
+interface CompleteInterviewBody {
+  interviewId: string;
+  report?: {
+    strengths?: string[];
+    improvements?: string[];
+    tips?: string[];
+    overallFeedback?: string;
+    metrics?: Record<string, unknown>;
+  };
+  questionsData?: Array<{
+    question: string;
+    questionNumber: number;
+    transcript: string;
+    metrics?: Record<string, unknown>;
+    audioURL?: string;
+  }>;
+  metadata?: Record<string, unknown>;
+}
+
+interface UpdateInterviewFeedbackBody {
+  report?: {
+    strengths?: string[];
+    improvements?: string[];
+    tips?: string[];
+    overallFeedback?: string;
+    metrics?: Record<string, unknown>;
+  };
+}
+
+/**
+ * @desc Start a new interview session
+ * @route POST /api/interviews/start
+ * @access Private (Authenticated Users)
+ */
+export const startInterview = async (
+  req: Request<{}, {}, StartInterviewBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const userId = requester._id || requester.id;
+    const { jobRole, resumeText, resumeFileName, resumeEvaluation } = req.body;
+
+    // Validate user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ message: "User not found." });
+      return;
+    }
+
+    // Check if user has sufficient licenses
+    const currentBalance = user.licenses || 0;
+    if (currentBalance < 1) {
+      res.status(400).json({
+        message: "Insufficient licenses to start an interview.",
+        currentBalance,
+        requiredLicenses: 1,
+      });
+      return;
+    }
+
+    // Create new interview session
+    const interview = new Interview({
+      userId: new mongoose.Types.ObjectId(userId),
+      jobRole: jobRole || null,
+      startedAt: new Date(),
+      status: "started",
+      resume: resumeText
+        ? {
+            text: resumeText,
+            fileName: resumeFileName || "resume.pdf",
+            evaluation: resumeEvaluation || {},
+          }
+        : null,
+      metadata: {
+        userAgent: req.get("user-agent"),
+        ipAddress: req.ip,
+      },
+    });
+
+    await interview.save();
+
+    res.status(201).json({
+      message: "Interview session started successfully.",
+      interview: {
+        _id: interview._id,
+        userId: interview.userId,
+        jobRole: interview.jobRole,
+        startedAt: interview.startedAt,
+        status: interview.status,
+      },
+      userBalance: {
+        current: currentBalance,
+        willBeDeducted: 1,
+        willRemainAfter: currentBalance - 1,
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error starting interview session.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Complete an interview session and deduct license
+ * @route POST /api/interviews/complete
+ * @access Private (Authenticated Users)
+ */
+export const completeInterview = async (
+  req: Request<{}, {}, CompleteInterviewBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const userId = requester._id || requester.id;
+    const {
+      interviewId,
+      report,
+      questionsData,
+      metadata: customMetadata,
+    } = req.body;
+
+    // Validate interviewId
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      res.status(400).json({ message: "Valid interviewId is required." });
+      return;
+    }
+
+    // Fetch interview
+    const interview = await Interview.findById(interviewId);
+    if (!interview) {
+      res.status(404).json({ message: "Interview session not found." });
+      return;
+    }
+
+    // Verify interview belongs to the user
+    if (interview.userId.toString() !== userId.toString()) {
+      res.status(403).json({
+        message: "You do not have permission to complete this interview.",
+      });
+      return;
+    }
+
+    // Verify interview status is still started or in_progress
+    if (interview.status !== "started" && interview.status !== "in_progress") {
+      res.status(400).json({
+        message: `Cannot complete interview with status: ${interview.status}`,
+      });
+      return;
+    }
+
+    // Fetch user for license deduction
+    const user = await User.findById(userId);
+    if (!user) {
+      res.status(404).json({ message: "User not found." });
+      return;
+    }
+
+    const balanceBefore = user.licenses || 0;
+
+    // Check sufficient licenses
+    if (balanceBefore < 1) {
+      res.status(400).json({
+        message: "Insufficient licenses to complete this interview.",
+        currentBalance: balanceBefore,
+      });
+      return;
+    }
+
+    const balanceAfter = balanceBefore - 1;
+
+    // Update interview with completion data
+    interview.status = "completed";
+    interview.completedAt = new Date();
+    interview.report = report || null;
+    interview.questionsData = questionsData || null;
+    interview.metadata = {
+      ...interview.metadata,
+      ...customMetadata,
+      completedAt: new Date(),
+    };
+
+    // Create license deduction transaction
+    const transaction = new Transaction({
+      type: "deducted",
+      userId: new mongoose.Types.ObjectId(userId),
+      amount: 1,
+      reason: "Interview Attendance",
+      interviewId: new mongoose.Types.ObjectId(interviewId),
+      description: `Interview completed for ${
+        interview.jobRole || "general"
+      } position`,
+      performedBy: null, // User initiated, not admin
+      balanceBefore,
+      balanceAfter,
+      status: "completed",
+      metadata: {
+        jobRole: interview.jobRole,
+        interviewDuration: interview.completedAt
+          ? (interview.completedAt.getTime() - interview.startedAt.getTime()) /
+            1000 // Duration in seconds
+          : 0,
+      },
+    });
+
+    // Update user's license balance
+    user.licenses = balanceAfter;
+
+    // Save all changes (interview, transaction, user)
+    await Promise.all([interview.save(), transaction.save(), user.save()]);
+
+    res.status(200).json({
+      message: "Interview completed successfully and license deducted.",
+      interview: {
+        _id: interview._id,
+        status: interview.status,
+        completedAt: interview.completedAt,
+      },
+      transaction: {
+        _id: transaction._id,
+        type: transaction.type,
+        amount: transaction.amount,
+        reason: transaction.reason,
+        balanceBefore,
+        balanceAfter,
+      },
+      userBalance: {
+        before: balanceBefore,
+        after: balanceAfter,
+        deducted: 1,
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error completing interview session.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Get interview details
+ * @route GET /api/interviews/:interviewId
+ * @access Private (User or Admin)
+ */
+export const getInterviewDetails = async (
+  req: Request<{ interviewId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { interviewId } = req.params;
+
+    // Validate interviewId format
+    if (!mongoose.Types.ObjectId.isValid(interviewId)) {
+      res.status(400).json({ message: "Invalid interviewId format." });
+      return;
+    }
+
+    const interview = await Interview.findById(interviewId);
+    if (!interview) {
+      res.status(404).json({ message: "Interview not found." });
+      return;
+    }
+
+    // Access control: User can only view their own interviews
+    if (
+      interview.userId.toString() !==
+        (requester._id || requester.id).toString() &&
+      requester.role !== "admin" &&
+      !requester.isSuperAdmin
+    ) {
+      res.status(403).json({
+        message: "You do not have permission to view this interview.",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      message: "Interview details retrieved successfully.",
+      interview,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error retrieving interview details.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Get all interviews for a user
+ * @route GET /api/interviews/user/:userId
+ * @access Private (User or Admin)
+ */
+export const getUserInterviews = async (
+  req: Request<{ userId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { userId } = req.params;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const skip = (page - 1) * limit;
+
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ message: "Invalid userId format." });
+      return;
+    }
+
+    // Access control: Users can only see their own, admins can see any
+    if (
+      userId !== (requester._id || requester.id).toString() &&
+      requester.role !== "admin" &&
+      !requester.isSuperAdmin
+    ) {
+      res.status(403).json({
+        message: "You do not have permission to view these interviews.",
+      });
+      return;
+    }
+
+    const interviews = await Interview.find({
+      userId: new mongoose.Types.ObjectId(userId),
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Interview.countDocuments({
+      userId: new mongoose.Types.ObjectId(userId),
+    });
+
+    res.status(200).json({
+      message: "Interviews retrieved successfully.",
+      interviews,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error retrieving user interviews.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Abandon an interview session (without deducting license)
+ * @route POST /api/interviews/:interviewId/abandon
+ * @access Private (User)
+ */
+export const abandonInterview = async (
+  req: Request<{ interviewId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { interviewId } = req.params;
+    const { reason } = req.body as { reason?: string };
+
+    // Validate interviewId format
+    if (!mongoose.Types.ObjectId.isValid(interviewId)) {
+      res.status(400).json({ message: "Invalid interviewId format." });
+      return;
+    }
+
+    const interview = await Interview.findById(interviewId);
+    if (!interview) {
+      res.status(404).json({ message: "Interview not found." });
+      return;
+    }
+
+    // Verify interview belongs to the user
+    if (
+      interview.userId.toString() !== (requester._id || requester.id).toString()
+    ) {
+      res.status(403).json({
+        message: "You do not have permission to abandon this interview.",
+      });
+      return;
+    }
+
+    // Only allow abandoning if not already completed
+    if (interview.status === "completed") {
+      res.status(400).json({
+        message: "Cannot abandon a completed interview.",
+      });
+      return;
+    }
+
+    interview.status = "abandoned";
+    interview.metadata = {
+      ...interview.metadata,
+      abandonedAt: new Date(),
+      abandonReason: reason || "User initiated abandonment",
+    };
+
+    await interview.save();
+
+    res.status(200).json({
+      message: "Interview abandoned successfully. No license was deducted.",
+      interview: {
+        _id: interview._id,
+        status: interview.status,
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error abandoning interview session.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Update interview with feedback/report
+ * @route PUT /api/interviews/:interviewId/feedback
+ * @access Private (Authenticated Users)
+ */
+export const updateInterviewFeedback = async (
+  req: Request<{ interviewId: string }, {}, UpdateInterviewFeedbackBody>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const userId = requester._id || requester.id;
+    const { interviewId } = req.params;
+    const { report } = req.body;
+
+    // Validate interviewId
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      res.status(400).json({ message: "Valid interviewId is required." });
+      return;
+    }
+
+    // Fetch interview
+    const interview = await Interview.findById(interviewId);
+    if (!interview) {
+      res.status(404).json({ message: "Interview session not found." });
+      return;
+    }
+
+    // Verify interview belongs to the user
+    if (interview.userId.toString() !== userId.toString()) {
+      res.status(403).json({
+        message: "You do not have permission to update this interview.",
+      });
+      return;
+    }
+
+    // Update only the report field
+    interview.report = report || null;
+    await interview.save();
+
+    res.status(200).json({
+      message: "Interview feedback updated successfully.",
+      interview: {
+        _id: interview._id,
+        status: interview.status,
+        report: interview.report,
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error updating interview feedback.",
+      error: errorMessage,
+    });
+  }
+};

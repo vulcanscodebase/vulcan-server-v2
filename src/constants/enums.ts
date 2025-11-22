@@ -22,3 +22,23 @@ export const PROFESSIONS = [
 ] as const;
 
 export type Profession = (typeof PROFESSIONS)[number];
+
+/**
+ * Transaction Type enum values
+ */
+export const TRANSACTION_TYPES = ["assigned", "deducted"] as const;
+
+export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+
+/**
+ * Transaction Reason enum values
+ */
+export const TRANSACTION_REASONS = [
+  "Pod Assignment",
+  "Interview Attendance",
+  "Admin Adjustment",
+  "Refund",
+  "Bulk Assignment",
+] as const;
+
+export type TransactionReason = (typeof TRANSACTION_REASONS)[number];
