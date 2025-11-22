@@ -21,6 +21,10 @@ import {
 import { hasPodAccess } from "../utils/access.js";
 import { logPodActivity } from "../utils/podLogger.js";
 import {
+  recordLicenseAssignment,
+  recordLicenseDeduction,
+} from "../utils/transactionHelper.js";
+import {
   type Profession,
   PROFESSIONS,
   type EducationStatus,
@@ -771,6 +775,18 @@ export const bulkAddPodUsers = async (
 
         await newUser.save();
 
+        // Record license assignment transaction for new user
+        if (user.licenses && user.licenses > 0) {
+          await recordLicenseAssignment(
+            newUser._id as mongoose.Types.ObjectId,
+            user.licenses,
+            pod._id as mongoose.Types.ObjectId,
+            admin._id as mongoose.Types.ObjectId,
+            "Bulk Assignment",
+            `Licenses assigned during bulk pod user creation for pod "${pod.name}"`
+          );
+        }
+
         if (pod.type === "private") {
           await sendPrivatePodRegistrationEmail(user.email, token, pod.name);
         } else {
@@ -791,6 +807,8 @@ export const bulkAddPodUsers = async (
       existingUsers.map(async (user: any) => {
         const existing = await User.findOne({ email: user.email });
         if (!existing) return null;
+
+        const previousLicenses = existing.licenses || 0;
 
         if (pod.type !== "private") {
           const profession: Profession =
@@ -815,6 +833,19 @@ export const bulkAddPodUsers = async (
         }
 
         await existing.save();
+
+        // Record license assignment transaction if licenses changed
+        if (user.licenses && user.licenses > previousLicenses) {
+          const licensesDifference = user.licenses - previousLicenses;
+          await recordLicenseAssignment(
+            existing._id as mongoose.Types.ObjectId,
+            licensesDifference,
+            pod._id as mongoose.Types.ObjectId,
+            admin._id as mongoose.Types.ObjectId,
+            "Bulk Assignment",
+            `Licenses assigned during bulk pod user update for pod "${pod.name}"`
+          );
+        }
 
         const alreadyInvited = pod.invitedUsers.find(
           (i) => i.email === user.email
@@ -929,6 +960,18 @@ export const addSingleUserToPod = async (
 
       await user.save();
 
+      // Record license assignment transaction for new user
+      if (licenses && licenses > 0) {
+        await recordLicenseAssignment(
+          user._id as mongoose.Types.ObjectId,
+          licenses,
+          pod._id as mongoose.Types.ObjectId,
+          requester._id as mongoose.Types.ObjectId,
+          "Pod Assignment",
+          `Licenses assigned during pod user creation for pod "${pod.name}"`
+        );
+      }
+
       if (pod.type === "private") {
         await sendPrivatePodRegistrationEmail(email, token, pod.name);
       } else {
@@ -942,6 +985,8 @@ export const addSingleUserToPod = async (
         status: "pending",
       });
     } else {
+      const previousLicenses = user?.licenses || 0;
+
       if (profileLocked && user) {
         Object.assign(user, userDetails);
         await user.save();
@@ -952,6 +997,19 @@ export const addSingleUserToPod = async (
           user.uniqueId = uniqueId;
         }
         await user.save();
+      }
+
+      // Record license assignment transaction if licenses changed
+      if (user && licenses && licenses > previousLicenses) {
+        const licensesDifference = licenses - previousLicenses;
+        await recordLicenseAssignment(
+          user._id as mongoose.Types.ObjectId,
+          licensesDifference,
+          pod._id as mongoose.Types.ObjectId,
+          requester._id as mongoose.Types.ObjectId,
+          "Pod Assignment",
+          `Licenses assigned during pod user update for pod "${pod.name}"`
+        );
       }
 
       const alreadyInvited = pod.invitedUsers?.find((i) => i.email === email);
@@ -1003,6 +1061,7 @@ export const removePodUser = async (
 ): Promise<void> => {
   try {
     const { podId, userId } = req.params;
+    const { licenseRefund } = req.body; // Optional: number of licenses to refund
     const requester = req.account;
 
     console.log(
@@ -1038,11 +1097,24 @@ export const removePodUser = async (
       await user.save();
     }
 
+    // ✅ Record license deduction transaction if specified
+    if (user && licenseRefund && licenseRefund > 0) {
+      await recordLicenseDeduction(
+        user._id as mongoose.Types.ObjectId,
+        licenseRefund,
+        requester._id as mongoose.Types.ObjectId,
+        "Refund",
+        `Licenses refunded due to removal from pod "${pod.name}"`
+      );
+    }
+
     // ✅ Activity Log
     await logPodActivity(
       pod._id as mongoose.Types.ObjectId,
       "remove-user",
-      `User ${user?.email || userId} removed from pod "${pod.name}"`,
+      `User ${user?.email || userId} removed from pod "${pod.name}"${
+        licenseRefund ? ` with license refund of ${licenseRefund}` : ""
+      }`,
       requester._id as mongoose.Types.ObjectId,
       true
     );
@@ -1052,6 +1124,7 @@ export const removePodUser = async (
       message: "User removed from pod successfully.",
       podId: pod._id,
       removedUserId: userId,
+      licenseRefundRecorded: licenseRefund ? true : false,
     });
   } catch (error) {
     console.error("❌ Error removing user from pod:", error);

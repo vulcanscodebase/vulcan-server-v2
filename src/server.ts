@@ -15,11 +15,13 @@ import passport from "./config/passport.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import podRoutes from "./routes/podRoutes.js";
+import transactionRoutes from "./routes/transactionRoutes.js";
+import interviewRoutes from "./routes/interviewRoutes.js";
 
 import { initializeSuperAdmin } from "./utils/initializeSuperAdmin.js";
 import connectDB from "./config/db.js";
 import path from "path";
-import podRoutes from "./routes/podRoutes.js";
 
 dotenv.config();
 
@@ -106,6 +108,8 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/pods", podRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api/interviews", interviewRoutes);
 
 // ✅ Health and Root routes
 app.get("/", (_req: Request, res: Response) => {
