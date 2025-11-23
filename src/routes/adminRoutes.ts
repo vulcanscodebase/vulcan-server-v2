@@ -13,12 +13,18 @@ import {
 } from "../controllers/adminController.js";
 
 import {
+  superAdminMassUploadUsers,
+  superAdminMassUploadPreview,
+} from "../controllers/podController.js";
+
+import {
   requireAdmin,
   requirePermission,
   requireCreateUserPermission,
 } from "../middlewares/adminMiddleware.js";
 
 import { protect } from "../middlewares/authMiddleware.js";
+import { uploadExcelFile } from "../middlewares/uploadMiddleware.js";
 
 const router: Router = express.Router();
 
@@ -55,6 +61,21 @@ router.get(
   "/",
   requirePermission("Team", "view") as RequestHandler,
   getAllAdmins as RequestHandler
+);
+
+// ✅ 6. Super Admin Mass Upload (Super Admin Only)
+router.post(
+  "/mass-upload-preview",
+  requireAdmin() as RequestHandler,
+  uploadExcelFile as RequestHandler,
+  superAdminMassUploadPreview as RequestHandler
+);
+
+router.post(
+  "/mass-upload-users",
+  requireAdmin() as RequestHandler,
+  uploadExcelFile as RequestHandler,
+  superAdminMassUploadUsers as RequestHandler
 );
 
 export default router;

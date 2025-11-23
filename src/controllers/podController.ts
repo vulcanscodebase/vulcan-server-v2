@@ -1840,3 +1840,440 @@ export const addLicensesToPod = async (
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+/**
+ * @desc Super Admin Mass Upload Users to Multiple Pods
+ * @route POST /api/admin/mass-upload-users
+ * @access Super Admin only
+ */
+export const superAdminMassUploadUsers = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+
+    // Only super admin can use this
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Only super admins can mass upload users.",
+      });
+      return;
+    }
+
+    if (!req.file?.buffer) {
+      res.status(400).json({ message: "Excel file is required." });
+      return;
+    }
+
+    // Parse Excel file
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const workbook = new ExcelJS.Workbook();
+    const stream = Readable.from(req.file.buffer as any);
+    const worksheet =
+      ext === ".csv"
+        ? await workbook.csv.read(stream)
+        : (await workbook.xlsx.load(req.file.buffer as any)).worksheets[0];
+
+    const extractCellValue = (cell: any): string =>
+      typeof cell?.value === "object" && cell.value?.text
+        ? cell.value.text.trim()
+        : cell?.value?.toString().trim() || "";
+
+    // Parse rows: Name, UniqueId, Email, Licenses, PodName
+    const rows: any[] = [];
+    worksheet?.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // Skip header
+
+      const name = extractCellValue(row.getCell("A"));
+      const uniqueId = extractCellValue(row.getCell("B"));
+      const email = extractCellValue(row.getCell("C")).toLowerCase();
+      const licensesRaw = row.getCell("D").value;
+      const licenses =
+        typeof licensesRaw === "number"
+          ? licensesRaw
+          : typeof licensesRaw === "string"
+          ? parseInt(licensesRaw, 10) || 0
+          : 0;
+      const podName = extractCellValue(row.getCell("E"));
+
+      if (email && podName) {
+        rows.push({ name, uniqueId, email, licenses, podName });
+      }
+    });
+
+    if (rows.length === 0) {
+      res.status(400).json({
+        message: "No valid rows found in Excel file.",
+      });
+      return;
+    }
+
+    // Validate emails
+    const invalidEmails: string[] = [];
+    const validRows = rows.filter((row) => {
+      if (!validator.isEmail(row.email)) {
+        invalidEmails.push(row.email);
+        return false;
+      }
+      return true;
+    });
+
+    // Get unique pod names
+    const podNames = [...new Set(validRows.map((r) => r.podName))];
+
+    // Find all pods by name
+    const pods = await Pod.find({
+      name: { $in: podNames },
+      isDeleted: false,
+    });
+
+    const foundPodNames = new Set(pods.map((p) => p.name));
+    const missingPodNames = podNames.filter((name) => !foundPodNames.has(name));
+
+    if (missingPodNames.length > 0) {
+      res.status(404).json({
+        message: "Some pods not found.",
+        missingPods: missingPodNames,
+      });
+      return;
+    }
+
+    // Group users by pod
+    const usersByPod: Map<string, any[]> = new Map();
+    for (const row of validRows) {
+      const existing = usersByPod.get(row.podName) || [];
+      existing.push(row);
+      usersByPod.set(row.podName, existing);
+    }
+
+    // Process each pod
+    const results: any[] = [];
+    let totalUsersAdded = 0;
+    let totalUsersUpdated = 0;
+    let totalLicensesAssigned = 0;
+
+    for (const pod of pods) {
+      const usersForPod = usersByPod.get(pod.name) || [];
+      if (usersForPod.length === 0) continue;
+
+      const newUsersForPod: any[] = [];
+      const existingUsersForPod: any[] = [];
+
+      // Categorize as new or existing
+      for (const userData of usersForPod) {
+        const existingUser = await User.findOne({ email: userData.email });
+        if (existingUser) {
+          existingUsersForPod.push(userData);
+        } else {
+          newUsersForPod.push(userData);
+        }
+      }
+
+      const isLocked = pod.type !== "private";
+      const profession: Profession =
+        pod.type === "institution" ? "Student" : "IT Profession";
+
+      // Add new users
+      const addedUsers = await Promise.all(
+        newUsersForPod.map(async (userData) => {
+          const token = jwt.sign(
+            { email: userData.email },
+            process.env.JWT_SECRET!,
+            { expiresIn: "2d" }
+          );
+
+          const newUser = new User({
+            email: userData.email,
+            name: pod.type === "private" ? "Pending Registration" : userData.name,
+            uniqueId: userData.uniqueId || null,
+            licenses: userData.licenses || 0,
+            profession,
+            schoolOrCollege:
+              pod.type === "institution" ? pod.institutionName : undefined,
+            organization:
+              pod.type === "organization" ? pod.organizationName : undefined,
+            educationStatus: pod.educationStatus || null,
+            verificationToken: token,
+            verified: false,
+            profileLocked: isLocked,
+          });
+
+          await newUser.save();
+
+          // Record license assignment
+          if (userData.licenses && userData.licenses > 0) {
+            await recordLicenseAssignment(
+              newUser._id as mongoose.Types.ObjectId,
+              userData.licenses,
+              pod._id as mongoose.Types.ObjectId,
+              requester._id as mongoose.Types.ObjectId,
+              "Bulk Assignment",
+              `Mass upload by super admin to pod "${pod.name}"`
+            );
+            totalLicensesAssigned += userData.licenses;
+
+            // Update pod's assigned licenses (super admin bypasses pool check)
+            pod.assignedLicenses = (pod.assignedLicenses || 0) + userData.licenses;
+          }
+
+          // Add to pod
+          pod.invitedUsers.push({
+            email: userData.email,
+            userId: newUser._id as mongoose.Types.ObjectId,
+            status: "pending",
+          });
+
+          // Send email
+          if (pod.type === "private") {
+            await sendPrivatePodRegistrationEmail(
+              userData.email,
+              token,
+              pod.name
+            );
+          } else {
+            await sendPodUserInviteEmail(userData.email, token, pod.name);
+          }
+
+          return newUser;
+        })
+      );
+
+      // Update existing users
+      const updatedUsers = await Promise.all(
+        existingUsersForPod.map(async (userData) => {
+          const user = await User.findOne({ email: userData.email });
+          if (!user) return null;
+
+          const previousLicenses = user.licenses || 0;
+
+          // Update user details if pod requires
+          if (pod.type !== "private") {
+            user.profession = profession;
+            user.schoolOrCollege =
+              pod.type === "institution"
+                ? pod.institutionName
+                : user.schoolOrCollege;
+            user.organization =
+              pod.type === "organization"
+                ? pod.organizationName
+                : user.organization;
+            if (pod.educationStatus) {
+              user.educationStatus = pod.educationStatus;
+            }
+            user.profileLocked = true;
+          }
+
+          if (userData.uniqueId) {
+            user.uniqueId = userData.uniqueId;
+          }
+
+          if (userData.licenses) {
+            user.licenses = userData.licenses;
+          }
+
+          await user.save();
+
+          // Record license assignment if increased
+          if (userData.licenses && userData.licenses > previousLicenses) {
+            const licensesDifference = userData.licenses - previousLicenses;
+            await recordLicenseAssignment(
+              user._id as mongoose.Types.ObjectId,
+              licensesDifference,
+              pod._id as mongoose.Types.ObjectId,
+              requester._id as mongoose.Types.ObjectId,
+              "Bulk Assignment",
+              `Mass upload by super admin to pod "${pod.name}"`
+            );
+            totalLicensesAssigned += licensesDifference;
+
+            // Update pod's assigned licenses
+            pod.assignedLicenses = (pod.assignedLicenses || 0) + licensesDifference;
+          }
+
+          // Add to pod if not already
+          const alreadyInPod = pod.invitedUsers.find(
+            (i) => i.email === userData.email
+          );
+          if (!alreadyInPod) {
+            pod.invitedUsers.push({
+              email: userData.email,
+              userId: user._id as mongoose.Types.ObjectId,
+              status: user.verified ? "joined" : "pending",
+            });
+          }
+
+          // Send notification
+          await sendEmail(
+            userData.email,
+            "You've been added to a new pod",
+            `Hello,\n\nYou've been added to the pod "${pod.name}". Please log in to your account to continue.\n\nThank you.`
+          );
+
+          return user;
+        })
+      );
+
+      await pod.save();
+
+      const addedCount = addedUsers.length;
+      const updatedCount = updatedUsers.filter(Boolean).length;
+      totalUsersAdded += addedCount;
+      totalUsersUpdated += updatedCount;
+
+      // Log activity
+      await logPodActivity(
+        pod._id as mongoose.Types.ObjectId,
+        "mass-upload",
+        `Super admin mass uploaded ${addedCount} new and ${updatedCount} existing users.`,
+        requester._id as mongoose.Types.ObjectId,
+        true
+      );
+
+      results.push({
+        podId: pod._id,
+        podName: pod.name,
+        usersAdded: addedCount,
+        usersUpdated: updatedCount,
+        totalUsers: addedCount + updatedCount,
+      });
+    }
+
+    res.status(200).json({
+      message: "✅ Mass upload completed successfully!",
+      summary: {
+        totalPodsAffected: pods.length,
+        totalUsersAdded,
+        totalUsersUpdated,
+        totalLicensesAssigned,
+        invalidEmails: invalidEmails.length > 0 ? invalidEmails : undefined,
+      },
+      podResults: results,
+    });
+  } catch (error) {
+    console.error("❌ Error in super admin mass upload:", error);
+    res.status(500).json({
+      message: "Internal server error during mass upload.",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+};
+
+/**
+ * @desc Preview Super Admin Mass Upload
+ * @route POST /api/admin/mass-upload-preview
+ * @access Super Admin only
+ */
+export const superAdminMassUploadPreview = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Only super admins can access this.",
+      });
+      return;
+    }
+
+    if (!req.file?.buffer) {
+      res.status(400).json({ message: "Excel file is required." });
+      return;
+    }
+
+    // Parse Excel
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const workbook = new ExcelJS.Workbook();
+    const stream = Readable.from(req.file.buffer as any);
+    const worksheet =
+      ext === ".csv"
+        ? await workbook.csv.read(stream)
+        : (await workbook.xlsx.load(req.file.buffer as any)).worksheets[0];
+
+    const extractCellValue = (cell: any): string =>
+      typeof cell?.value === "object" && cell.value?.text
+        ? cell.value.text.trim()
+        : cell?.value?.toString().trim() || "";
+
+    const rows: any[] = [];
+    worksheet?.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const name = extractCellValue(row.getCell("A"));
+      const uniqueId = extractCellValue(row.getCell("B"));
+      const email = extractCellValue(row.getCell("C")).toLowerCase();
+      const licensesRaw = row.getCell("D").value;
+      const licenses =
+        typeof licensesRaw === "number"
+          ? licensesRaw
+          : typeof licensesRaw === "string"
+          ? parseInt(licensesRaw, 10) || 0
+          : 0;
+      const podName = extractCellValue(row.getCell("E"));
+
+      if (email && podName) {
+        rows.push({ name, uniqueId, email, licenses, podName });
+      }
+    });
+
+    // Validate and group
+    const invalidEmails: string[] = [];
+    const validRows = rows.filter((row) => {
+      if (!validator.isEmail(row.email)) {
+        invalidEmails.push(row.email);
+        return false;
+      }
+      return true;
+    });
+
+    const podNames = [...new Set(validRows.map((r) => r.podName))];
+    const pods = await Pod.find({
+      name: { $in: podNames },
+      isDeleted: false,
+    });
+
+    const foundPodNames = new Set(pods.map((p) => p.name));
+    const missingPodNames = podNames.filter((name) => !foundPodNames.has(name));
+
+    // Group by pod
+    const usersByPod: any = {};
+    for (const row of validRows) {
+      if (!usersByPod[row.podName]) {
+        usersByPod[row.podName] = [];
+      }
+      usersByPod[row.podName].push({
+        name: row.name,
+        email: row.email,
+        uniqueId: row.uniqueId,
+        licenses: row.licenses,
+      });
+    }
+
+    res.status(200).json({
+      message: "Preview generated successfully.",
+      summary: {
+        totalRows: rows.length,
+        validRows: validRows.length,
+        invalidEmails,
+        podsFound: pods.length,
+        missingPods: missingPodNames,
+      },
+      usersByPod,
+      pods: pods.map((p) => ({
+        id: p._id,
+        name: p.name,
+        type: p.type,
+        currentLicenses: {
+          total: p.totalLicenses || 0,
+          assigned: p.assignedLicenses || 0,
+          available: Math.max(0, (p.totalLicenses || 0) - (p.assignedLicenses || 0)),
+        },
+      })),
+    });
+  } catch (error) {
+    console.error("❌ Error in mass upload preview:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};

@@ -47,7 +47,7 @@ const PORT = process.env.PORT || 5000;
 // ✅ CORS Configuration
 const FRONTEND_URL: string = process.env.FRONTEND_URL!; // Assumes it MUST be set
 
-const allowedOrigins: string[] = [FRONTEND_URL, "http://localhost:3000", "http://localhost:3001"];
+const allowedOrigins: string[] = [FRONTEND_URL, "http://localhost:3000", "http://localhost:3001", "https://admin.vulcans.co.in"];
 
 app.use(
   cors({
