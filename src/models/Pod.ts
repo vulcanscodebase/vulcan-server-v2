@@ -37,6 +37,9 @@ export interface IPod extends Document {
   tags?: string[];
   assignedTests?: Types.ObjectId[];
   assignedCourses?: Types.ObjectId[];
+  // Interview License Management
+  totalLicenses?: number; // Total licenses available for this pod
+  assignedLicenses?: number; // Licenses already assigned to users
   // Nested pod fields
   parentPodId?: Types.ObjectId | null;
   nestingLevel?: number;
@@ -44,6 +47,8 @@ export interface IPod extends Document {
   path?: string;
   createdAt: Date;
   updatedAt: Date;
+  // Virtual field for available licenses
+  availableLicenses?: number;
 }
 
 const podSchema = new Schema<IPod>(
@@ -92,14 +97,28 @@ const podSchema = new Schema<IPod>(
     tags: { type: [String], default: [] },
     assignedTests: [{ type: Schema.Types.ObjectId, ref: "Test" }],
     assignedCourses: [{ type: Schema.Types.ObjectId, ref: "Course" }],
+    // Interview License Management
+    totalLicenses: { type: Number, default: 0, min: 0 },
+    assignedLicenses: { type: Number, default: 0, min: 0 },
     // Nested pod fields
     parentPodId: { type: Schema.Types.ObjectId, ref: "Pod", default: null },
     nestingLevel: { type: Number, default: 0 },
     childPods: [{ type: Schema.Types.ObjectId, ref: "Pod" }],
     path: { type: String, default: null },
   },
-  { timestamps: true }
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
 );
+
+// Virtual field for available licenses
+podSchema.virtual("availableLicenses").get(function (this: IPod) {
+  const total = this.totalLicenses || 0;
+  const assigned = this.assignedLicenses || 0;
+  return Math.max(0, total - assigned);
+});
 
 podSchema.index({ name: 1 });
 podSchema.index({ createdBy: 1 });

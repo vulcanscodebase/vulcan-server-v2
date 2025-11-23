@@ -8,6 +8,9 @@ import {
   getUserInterviews,
   abandonInterview,
   updateInterviewFeedback,
+  getPodInterviewReports,
+  getAllInterviewReports,
+  getPodInterviewStatistics,
 } from "../controllers/interviewController.js";
 
 import { protect } from "../middlewares/authMiddleware.js";
@@ -190,6 +193,71 @@ router.put(
   ],
   validateRequest,
   updateInterviewFeedback as unknown as RequestHandler
+);
+
+/**
+ * @route GET /api/interviews/admin/all-reports
+ * @desc Get all interview reports across all pods
+ * @access Private (Admin/SuperAdmin only)
+ */
+router.get(
+  "/admin/all-reports",
+  [
+    query("page")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("Page must be a positive integer."),
+    query("limit")
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage("Limit must be between 1 and 100."),
+    query("status")
+      .optional()
+      .isIn(["started", "in_progress", "completed", "abandoned"])
+      .withMessage("Invalid status value."),
+    query("podId")
+      .optional()
+      .isMongoId()
+      .withMessage("Invalid pod ID format."),
+  ],
+  validateRequest,
+  getAllInterviewReports as RequestHandler
+);
+
+/**
+ * @route GET /api/interviews/admin/pod-statistics
+ * @desc Get pod-wise interview statistics
+ * @access Private (Admin/SuperAdmin only)
+ */
+router.get(
+  "/admin/pod-statistics",
+  getPodInterviewStatistics as RequestHandler
+);
+
+/**
+ * @route GET /api/interviews/pod/:podId/reports
+ * @desc Get all interview reports for a specific pod
+ * @access Private (Admin/SuperAdmin only)
+ */
+router.get(
+  "/pod/:podId/reports",
+  [
+    param("podId").isMongoId().withMessage("Invalid pod ID format."),
+    query("page")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("Page must be a positive integer."),
+    query("limit")
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage("Limit must be between 1 and 100."),
+    query("status")
+      .optional()
+      .isIn(["started", "in_progress", "completed", "abandoned"])
+      .withMessage("Invalid status value."),
+  ],
+  validateRequest,
+  getPodInterviewReports as unknown as RequestHandler
 );
 
 export default router;

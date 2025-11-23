@@ -928,6 +928,30 @@ export const addSingleUserToPod = async (
     });
     const isNewUser = !user;
 
+    // ✅ License validation - Check if pod has enough available licenses
+    // Super admins bypass this check
+    if (licenses && licenses > 0 && !requester.isSuperAdmin) {
+      const podTotal = pod.totalLicenses || 0;
+      const podAssigned = pod.assignedLicenses || 0;
+      const podAvailable = Math.max(0, podTotal - podAssigned);
+      
+      const previousUserLicenses = user?.licenses || 0;
+      const licensesToAssign = isNewUser ? licenses : Math.max(0, licenses - previousUserLicenses);
+      
+      if (licensesToAssign > podAvailable) {
+        res.status(400).json({
+          message: `Insufficient licenses in pod. Available: ${podAvailable}, Requested: ${licensesToAssign}.`,
+          pod: {
+            name: pod.name,
+            totalLicenses: podTotal,
+            assignedLicenses: podAssigned,
+            availableLicenses: podAvailable,
+          },
+        });
+        return;
+      }
+    }
+
     const profession =
       pod.type === "institution"
         ? "Student"
@@ -970,6 +994,9 @@ export const addSingleUserToPod = async (
           "Pod Assignment",
           `Licenses assigned during pod user creation for pod "${pod.name}"`
         );
+        
+        // Update pod's assigned licenses count
+        pod.assignedLicenses = (pod.assignedLicenses || 0) + licenses;
       }
 
       if (pod.type === "private") {
@@ -1010,6 +1037,9 @@ export const addSingleUserToPod = async (
           "Pod Assignment",
           `Licenses assigned during pod user update for pod "${pod.name}"`
         );
+        
+        // Update pod's assigned licenses count
+        pod.assignedLicenses = (pod.assignedLicenses || 0) + licensesDifference;
       }
 
       const alreadyInvited = pod.invitedUsers?.find((i) => i.email === email);
@@ -1500,5 +1530,313 @@ export const getPodAnalytics = async (
     res.status(500).json({
       message: "Internal server error while fetching analytics.",
     });
+  }
+};
+
+/**
+ * @desc Assign or add licenses to a pod (Super Admin only)
+ * @route POST /api/pods/:podId/assign-licenses
+ * @access Private (Super Admin only)
+ */
+export const assignLicensesToPod = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { podId } = req.params;
+    const { licenses, operation } = req.body; // operation: "set" or "add"
+
+    // Super Admin check
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Only Super Admin can assign licenses to pods.",
+      });
+      return;
+    }
+
+    // Validate licenses
+    if (typeof licenses !== "number" || licenses < 0) {
+      res.status(400).json({
+        message: "Licenses must be a positive number.",
+      });
+      return;
+    }
+
+    // Validate operation
+    if (operation && !["set", "add"].includes(operation)) {
+      res.status(400).json({
+        message: 'Operation must be either "set" or "add".',
+      });
+      return;
+    }
+
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    const previousTotal = pod.totalLicenses || 0;
+    const previousAssigned = pod.assignedLicenses || 0;
+    const previousAvailable = Math.max(0, previousTotal - previousAssigned);
+
+    let newTotal: number;
+    let operationType: string;
+
+    if (operation === "add") {
+      // Add more licenses to existing pool
+      newTotal = previousTotal + licenses;
+      operationType = "added";
+    } else {
+      // Set total licenses (default behavior)
+      newTotal = licenses;
+      operationType = "set";
+    }
+
+    // Ensure total licenses is not less than already assigned licenses
+    if (newTotal < previousAssigned) {
+      res.status(400).json({
+        message: `Cannot set total licenses to ${newTotal}. ${previousAssigned} licenses are already assigned to users. Total must be at least ${previousAssigned}.`,
+        currentAssigned: previousAssigned,
+      });
+      return;
+    }
+
+    pod.totalLicenses = newTotal;
+    await pod.save();
+
+    const newAvailable = Math.max(0, newTotal - previousAssigned);
+
+    await logPodActivity(
+      pod._id as mongoose.Types.ObjectId,
+      "license-assignment",
+      `Licenses ${operationType}: ${licenses} (Total: ${previousTotal} → ${newTotal}, Available: ${previousAvailable} → ${newAvailable})`,
+      requester._id as mongoose.Types.ObjectId,
+      true
+    );
+
+    res.status(200).json({
+      message: `✅ Successfully ${operationType} ${licenses} licenses to pod "${pod.name}".`,
+      pod: {
+        _id: pod._id,
+        name: pod.name,
+        licenses: {
+          total: newTotal,
+          assigned: previousAssigned,
+          available: newAvailable,
+          previousTotal,
+          previousAvailable,
+          licenseChange: newTotal - previousTotal,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error assigning licenses to pod:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Get pod license information
+ * @route GET /api/pods/:podId/licenses
+ * @access Private (Admin/Super Admin)
+ */
+export const getPodLicenses = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { podId } = req.params;
+
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    // Permission check
+    if (!hasPodAccess(requester, pod)) {
+      res.status(403).json({
+        message: "Access denied. You are not authorized to view this pod's licenses.",
+      });
+      return;
+    }
+
+    const total = pod.totalLicenses || 0;
+    const assigned = pod.assignedLicenses || 0;
+    const available = Math.max(0, total - assigned);
+    const usagePercentage = total > 0 ? Math.round((assigned / total) * 100) : 0;
+
+    res.status(200).json({
+      message: "Pod license information retrieved successfully.",
+      pod: {
+        _id: pod._id,
+        name: pod.name,
+        type: pod.type,
+      },
+      licenses: {
+        total,
+        assigned,
+        available,
+        usagePercentage,
+        canAssignMore: available > 0,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching pod licenses:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Set or update total licenses for a pod (Super Admin only)
+ * @route PUT /api/pods/:podId/licenses/set
+ * @access Super Admin only
+ */
+export const setPodLicenses = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { podId } = req.params;
+    const { totalLicenses } = req.body;
+    const requester = req.account;
+
+    // Only super admin can set pod licenses
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Only super admins can set pod licenses.",
+      });
+      return;
+    }
+
+    if (typeof totalLicenses !== "number" || totalLicenses < 0) {
+      res.status(400).json({
+        message: "Valid totalLicenses (non-negative number) is required.",
+      });
+      return;
+    }
+
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    const previousTotal = pod.totalLicenses || 0;
+    const assigned = pod.assignedLicenses || 0;
+
+    // Warn if setting total below already assigned (but allow it)
+    if (totalLicenses < assigned) {
+      console.warn(
+        `⚠️  Setting total licenses (${totalLicenses}) below assigned licenses (${assigned}) for pod ${pod.name}`
+      );
+    }
+
+    pod.totalLicenses = totalLicenses;
+    await pod.save();
+
+    await logPodActivity(
+      pod._id as mongoose.Types.ObjectId,
+      "set-licenses",
+      `Total licenses set to ${totalLicenses} (was ${previousTotal})`,
+      requester._id as mongoose.Types.ObjectId,
+      true
+    );
+
+    const available = Math.max(0, totalLicenses - assigned);
+
+    res.status(200).json({
+      message: `✅ Pod licenses set successfully to ${totalLicenses}.`,
+      pod: {
+        _id: pod._id,
+        name: pod.name,
+        type: pod.type,
+      },
+      licenses: {
+        total: totalLicenses,
+        assigned,
+        available,
+        previousTotal,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error setting pod licenses:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Add more licenses to an existing pod (Super Admin only)
+ * @route POST /api/pods/:podId/licenses/add
+ * @access Super Admin only
+ */
+export const addLicensesToPod = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { podId } = req.params;
+    const { amount } = req.body;
+    const requester = req.account;
+
+    // Only super admin can add pod licenses
+    if (!requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Only super admins can add pod licenses.",
+      });
+      return;
+    }
+
+    if (typeof amount !== "number" || amount <= 0) {
+      res.status(400).json({
+        message: "Valid amount (positive number) is required.",
+      });
+      return;
+    }
+
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    const previousTotal = pod.totalLicenses || 0;
+    const newTotal = previousTotal + amount;
+    const assigned = pod.assignedLicenses || 0;
+
+    pod.totalLicenses = newTotal;
+    await pod.save();
+
+    await logPodActivity(
+      pod._id as mongoose.Types.ObjectId,
+      "add-licenses",
+      `Added ${amount} licenses to pod. Total: ${previousTotal} → ${newTotal}`,
+      requester._id as mongoose.Types.ObjectId,
+      true
+    );
+
+    const available = Math.max(0, newTotal - assigned);
+
+    res.status(200).json({
+      message: `✅ Successfully added ${amount} licenses to pod.`,
+      pod: {
+        _id: pod._id,
+        name: pod.name,
+        type: pod.type,
+      },
+      licenses: {
+        total: newTotal,
+        assigned,
+        available,
+        added: amount,
+        previousTotal,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error adding licenses to pod:", error);
+    res.status(500).json({ message: "Internal server error." });
   }
 };

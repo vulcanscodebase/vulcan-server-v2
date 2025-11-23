@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { Interview, type IInterview } from "../models/Interview.js";
 import { User, type IUser } from "../models/User.js";
 import { Transaction, type ITransaction } from "../models/Transaction.js";
+import { Pod, type IPod } from "../models/Pod.js";
 
 interface StartInterviewBody {
   jobRole?: string;
@@ -498,6 +499,318 @@ export const updateInterviewFeedback = async (
       error instanceof Error ? error.message : "Internal server error";
     res.status(500).json({
       message: "Error updating interview feedback.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Get all interview reports by pod (Admin only)
+ * @route GET /api/interviews/pod/:podId/reports
+ * @access Private (Admin/SuperAdmin only)
+ */
+export const getPodInterviewReports = async (
+  req: Request<{ podId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { podId } = req.params;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const skip = (page - 1) * limit;
+    const status = req.query.status as string | undefined;
+
+    // Authorization: Only admin or super admin
+    if (requester.role !== "admin" && !requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Admin or Super Admin privileges required.",
+      });
+      return;
+    }
+
+    // Validate podId
+    if (!mongoose.Types.ObjectId.isValid(podId)) {
+      res.status(400).json({ message: "Invalid podId format." });
+      return;
+    }
+
+    // Fetch pod
+    const pod = await Pod.findById(podId);
+    if (!pod) {
+      res.status(404).json({ message: "Pod not found." });
+      return;
+    }
+
+    // Get all user IDs from the pod's invitedUsers who have joined
+    const userIds = pod.invitedUsers
+      .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
+      .map((invitedUser) => invitedUser.userId);
+
+    if (userIds.length === 0) {
+      res.status(200).json({
+        message: "No users found in this pod.",
+        pod: {
+          _id: pod._id,
+          name: pod.name,
+          type: pod.type,
+        },
+        interviews: [],
+        pagination: {
+          total: 0,
+          page,
+          limit,
+          pages: 0,
+        },
+      });
+      return;
+    }
+
+    // Build query
+    const query: any = {
+      userId: { $in: userIds },
+    };
+
+    if (status) {
+      query.status = status;
+    }
+
+    // Fetch interviews with user details
+    const interviews = await Interview.find(query)
+      .populate("userId", "name email profilePhoto educationStatus profession")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Interview.countDocuments(query);
+
+    res.status(200).json({
+      message: "Pod interview reports retrieved successfully.",
+      pod: {
+        _id: pod._id,
+        name: pod.name,
+        type: pod.type,
+        institutionName: pod.institutionName,
+        organizationName: pod.organizationName,
+      },
+      interviews,
+      statistics: {
+        totalInterviews: total,
+        totalUsers: userIds.length,
+      },
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error retrieving pod interview reports.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Get all interview reports across all pods (Admin only)
+ * @route GET /api/interviews/admin/all-reports
+ * @access Private (Admin/SuperAdmin only)
+ */
+export const getAllInterviewReports = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const skip = (page - 1) * limit;
+    const status = req.query.status as string | undefined;
+    const podId = req.query.podId as string | undefined;
+
+    // Authorization: Only admin or super admin
+    if (requester.role !== "admin" && !requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Admin or Super Admin privileges required.",
+      });
+      return;
+    }
+
+    // Build query
+    const query: any = {};
+
+    if (status) {
+      query.status = status;
+    }
+
+    // If podId is provided, filter by pod users
+    let userIds: mongoose.Types.ObjectId[] | undefined;
+    if (podId) {
+      if (!mongoose.Types.ObjectId.isValid(podId)) {
+        res.status(400).json({ message: "Invalid podId format." });
+        return;
+      }
+      const pod = await Pod.findById(podId);
+      if (pod) {
+        userIds = pod.invitedUsers
+          .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
+          .map((invitedUser) => invitedUser.userId) as mongoose.Types.ObjectId[];
+        query.userId = { $in: userIds };
+      }
+    }
+
+    // Fetch interviews with user details
+    const interviews = await Interview.find(query)
+      .populate("userId", "name email profilePhoto educationStatus profession")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Interview.countDocuments(query);
+
+    // Get statistics
+    const completedCount = await Interview.countDocuments({
+      ...query,
+      status: "completed",
+    });
+    const inProgressCount = await Interview.countDocuments({
+      ...query,
+      status: { $in: ["started", "in_progress"] },
+    });
+    const abandonedCount = await Interview.countDocuments({
+      ...query,
+      status: "abandoned",
+    });
+
+    res.status(200).json({
+      message: "All interview reports retrieved successfully.",
+      interviews,
+      statistics: {
+        total,
+        completed: completedCount,
+        inProgress: inProgressCount,
+        abandoned: abandonedCount,
+      },
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error retrieving all interview reports.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
+ * @desc Get pod-wise interview statistics (Admin only)
+ * @route GET /api/interviews/admin/pod-statistics
+ * @access Private (Admin/SuperAdmin only)
+ */
+export const getPodInterviewStatistics = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+
+    // Authorization: Only admin or super admin
+    if (requester.role !== "admin" && !requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Admin or Super Admin privileges required.",
+      });
+      return;
+    }
+
+    // Fetch all pods
+    const pods = await Pod.find({ isDeleted: false }).lean();
+
+    // Build statistics for each pod
+    const podStatistics = await Promise.all(
+      pods.map(async (pod) => {
+        const userIds = pod.invitedUsers
+          .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
+          .map((invitedUser) => invitedUser.userId);
+
+        if (userIds.length === 0) {
+          return {
+            pod: {
+              _id: pod._id,
+              name: pod.name,
+              type: pod.type,
+              institutionName: pod.institutionName,
+              organizationName: pod.organizationName,
+            },
+            statistics: {
+              totalUsers: 0,
+              totalInterviews: 0,
+              completed: 0,
+              inProgress: 0,
+              abandoned: 0,
+            },
+          };
+        }
+
+        const totalInterviews = await Interview.countDocuments({
+          userId: { $in: userIds },
+        });
+        const completed = await Interview.countDocuments({
+          userId: { $in: userIds },
+          status: "completed",
+        });
+        const inProgress = await Interview.countDocuments({
+          userId: { $in: userIds },
+          status: { $in: ["started", "in_progress"] },
+        });
+        const abandoned = await Interview.countDocuments({
+          userId: { $in: userIds },
+          status: "abandoned",
+        });
+
+        return {
+          pod: {
+            _id: pod._id,
+            name: pod.name,
+            type: pod.type,
+            institutionName: pod.institutionName,
+            organizationName: pod.organizationName,
+          },
+          statistics: {
+            totalUsers: userIds.length,
+            totalInterviews,
+            completed,
+            inProgress,
+            abandoned,
+          },
+        };
+      })
+    );
+
+    // Sort by total interviews descending
+    podStatistics.sort((a, b) => b.statistics.totalInterviews - a.statistics.totalInterviews);
+
+    res.status(200).json({
+      message: "Pod-wise interview statistics retrieved successfully.",
+      podStatistics,
+      totalPods: pods.length,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error retrieving pod interview statistics.",
       error: errorMessage,
     });
   }

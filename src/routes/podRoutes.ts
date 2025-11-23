@@ -26,6 +26,8 @@ import {
   //   clonePod,
   getPodAnalytics,
   permanentlyDeletePod,
+  setPodLicenses,
+  addLicensesToPod,
 } from "../controllers/podController.js";
 
 import { protect } from "../middlewares/authMiddleware.js";
@@ -206,5 +208,28 @@ router.get(
 //   requirePermission("Groups", "create") as RequestHandler,
 //   clonePod as RequestHandler
 // );
+
+// ✅ License Management (Super Admin only)
+router.put(
+  "/:podId/licenses/set",
+  [
+    body("totalLicenses")
+      .isInt({ min: 0 })
+      .withMessage("Total licenses must be a non-negative integer."),
+  ],
+  validateRequest as RequestHandler,
+  setPodLicenses as RequestHandler
+);
+
+router.post(
+  "/:podId/licenses/add",
+  [
+    body("amount")
+      .isInt({ min: 1 })
+      .withMessage("Amount must be a positive integer."),
+  ],
+  validateRequest as RequestHandler,
+  addLicensesToPod as RequestHandler
+);
 
 export default router;
