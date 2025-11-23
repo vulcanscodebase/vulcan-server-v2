@@ -1091,7 +1091,7 @@ export const removePodUser = async (
 ): Promise<void> => {
   try {
     const { podId, userId } = req.params;
-    const { licenseRefund } = req.body; // Optional: number of licenses to refund
+    const licenseRefund = req.body?.licenseRefund; // Optional: number of licenses to refund
     const requester = req.account;
 
     console.log(
