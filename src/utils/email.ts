@@ -91,25 +91,25 @@ export const sendPasswordSetupEmail = async (
   await sendEmail(email, "Set Up Your Admin Account", text);
 };
 
-// ✅ Pod User Invite
+// ✅ Pod User Invite (Regular Users - Use FRONTEND_URL)
 export const sendPodUserInviteEmail = async (
   email: string,
   inviteToken: string,
   podName: string
 ) => {
-  const inviteUrl = `${process.env.ADMIN_URL}/setup-password?token=${inviteToken}`;
+  const inviteUrl = `${process.env.FRONTEND_URL}/setup-password?token=${inviteToken}`;
   const text = `Hello,\n\nYou've been added to the group '${podName}'. Please complete your account setup using the link below:\n\n${inviteUrl}\n\nThis link expires in 24 hours.\n\nThank you.`;
 
   await sendEmail(email, `Complete Your Account for ${podName}`, text);
 };
 
-// ✅ Private Pod Registration Instruction Email
+// ✅ Private Pod Registration Instruction Email (Regular Users - Use FRONTEND_URL)
 export const sendPrivatePodRegistrationEmail = async (
   email: string,
   token: string,
   podName: string
 ) => {
-  const registrationUrl = `${process.env.ADMIN_URL}/signup`;
+  const registrationUrl = `${process.env.FRONTEND_URL}/signup`;
   const text = `Hello,\n\nYou've been invited to join the group "${podName}" on Vulcans Academy.\n\nPlease register an account using this email address (${email}) by visiting:\n\n${registrationUrl}\n\nMake sure to use the SAME EMAIL while registering. Once done, you'll automatically be linked to the group.\n\nThank you.`;
 
   await sendEmail(email, `Register to Join ${podName}`, text);
