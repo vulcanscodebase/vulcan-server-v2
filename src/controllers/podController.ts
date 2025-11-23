@@ -1990,9 +1990,9 @@ export const superAdminMassUploadUsers = async (
             licenses: userData.licenses || 0,
             profession,
             schoolOrCollege:
-              pod.type === "institution" ? pod.institutionName : undefined,
+              pod.type === "institution" ? (pod.institutionName || undefined) : undefined,
             organization:
-              pod.type === "organization" ? pod.organizationName : undefined,
+              pod.type === "organization" ? (pod.organizationName || undefined) : undefined,
             educationStatus: pod.educationStatus || null,
             verificationToken: token,
             verified: false,
@@ -2052,11 +2052,11 @@ export const superAdminMassUploadUsers = async (
             user.profession = profession;
             user.schoolOrCollege =
               pod.type === "institution"
-                ? pod.institutionName
+                ? (pod.institutionName || null)
                 : user.schoolOrCollege;
             user.organization =
               pod.type === "organization"
-                ? pod.organizationName
+                ? (pod.organizationName || null)
                 : user.organization;
             if (pod.educationStatus) {
               user.educationStatus = pod.educationStatus;
