@@ -1,9 +1,11 @@
 import { type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt, { type JwtPayload } from "jsonwebtoken";
+import mongoose from "mongoose";
 import { Admin, type IAdmin } from "../models/Admin.js";
 import { Role, type IRole } from "../models/Role.js";
 import { type IBlacklist, Blacklist } from "../models/Blacklist.js";
+import { Pod } from "../models/Pod.js";
 import { sendPasswordSetupEmail } from "../utils/email.js";
 
 // 🧩 Types for request body
@@ -520,6 +522,92 @@ export const getAllAdmins = async (
     res.status(200).json(admins);
   } catch (error) {
     console.error("❌ Error fetching all admins:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Delete an admin (Super Admin only)
+ * @route DELETE /api/admin/:adminId
+ * @access Private (Super Admin only)
+ */
+export const deleteAdmin = async (
+  req: Request<{ adminId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account as IAdmin | undefined;
+    const { adminId } = req.params;
+
+    if (!requester) {
+      res.status(401).json({ message: "Unauthorized: No account found in request." });
+      return;
+    }
+
+    // ✅ Only super admins can delete admins
+    if (!requester.isSuperAdmin) {
+      console.warn(`❌ ${requester.email} attempted to delete admin without super admin permission`);
+      res.status(403).json({
+        message: "Access denied. Only Super Admins can delete admin accounts.",
+      });
+      return;
+    }
+
+    // ✅ Validate adminId
+    if (!mongoose.Types.ObjectId.isValid(adminId)) {
+      res.status(400).json({ message: "Invalid admin ID format." });
+      return;
+    }
+
+    // ✅ Find the admin to delete
+    const adminToDelete = await Admin.findById(adminId);
+    if (!adminToDelete) {
+      res.status(404).json({ message: "Admin not found." });
+      return;
+    }
+
+    // ✅ Prevent deleting yourself
+    if (requester._id.toString() === adminId) {
+      res.status(400).json({
+        message: "You cannot delete your own admin account. Please contact another super admin.",
+      });
+      return;
+    }
+
+    // ✅ Prevent deleting another super admin
+    if (adminToDelete.isSuperAdmin) {
+      res.status(400).json({
+        message: "Cannot delete a Super Admin account. Only Super Admins can manage Super Admin accounts.",
+      });
+      return;
+    }
+
+    // ✅ Check if admin manages any pods
+    const managedPods = await Pod.countDocuments({ managedBy: adminId });
+    if (managedPods > 0) {
+      res.status(400).json({
+        message: `Cannot delete this admin. They are currently managing ${managedPods} pod(s). Please reassign or delete those pods first.`,
+        managedPodsCount: managedPods,
+      });
+      return;
+    }
+
+    // ✅ Delete the admin
+    await adminToDelete.deleteOne();
+
+    console.log(`✅ Admin '${adminToDelete.email}' (ID: ${adminId}) deleted successfully by ${requester.email}`);
+
+    res.status(200).json({
+      message: `Admin '${adminToDelete.name}' has been successfully deleted.`,
+      deletedAdmin: {
+        id: adminToDelete._id,
+        name: adminToDelete.name,
+        email: adminToDelete.email,
+        role: adminToDelete.role,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error deleting admin:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };

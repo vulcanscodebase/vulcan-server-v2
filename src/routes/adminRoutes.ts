@@ -10,6 +10,7 @@ import {
   logoutAdmin,
   getCurrentAdmin,
   refreshTokenAdmin,
+  deleteAdmin,
 } from "../controllers/adminController.js";
 
 import {
@@ -61,6 +62,11 @@ router.get(
   "/",
   requirePermission("Team", "view") as RequestHandler,
   getAllAdmins as RequestHandler
+);
+router.delete(
+  "/:adminId",
+  requirePermission("SuperAdmin", "delete") as RequestHandler,
+  deleteAdmin as RequestHandler
 );
 
 // ✅ 6. Super Admin Mass Upload (Super Admin Only)
