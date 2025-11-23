@@ -2053,11 +2053,11 @@ export const superAdminMassUploadUsers = async (
             user.schoolOrCollege =
               pod.type === "institution"
                 ? (pod.institutionName || null)
-                : user.schoolOrCollege;
+                : (user.schoolOrCollege || null);
             user.organization =
               pod.type === "organization"
                 ? (pod.organizationName || null)
-                : user.organization;
+                :  (user.organization || null);
             if (pod.educationStatus) {
               user.educationStatus = pod.educationStatus;
             }
