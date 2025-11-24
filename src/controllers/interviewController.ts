@@ -762,6 +762,89 @@ export const getAllInterviewReports = async (
 };
 
 /**
+ * @desc Delete an interview (Admin/SuperAdmin only)
+ * @route DELETE /api/interviews/:interviewId
+ * @access Private (Admin/SuperAdmin only)
+ */
+export const deleteInterview = async (
+  req: Request<{ interviewId: string }>,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account;
+    const { interviewId } = req.params;
+
+    // Authorization: Only admin or super admin
+    if (requester.role !== "admin" && !requester.isSuperAdmin) {
+      res.status(403).json({
+        message: "Access denied. Admin or Super Admin privileges required.",
+      });
+      return;
+    }
+
+    // Validate interviewId
+    if (!mongoose.Types.ObjectId.isValid(interviewId)) {
+      res.status(400).json({ message: "Invalid interviewId format." });
+      return;
+    }
+
+    // Fetch interview
+    const interview = await Interview.findById(interviewId);
+    if (!interview) {
+      res.status(404).json({ message: "Interview not found." });
+      return;
+    }
+
+    // For regular admins, verify they have access to the user's pod
+    if (!requester.isSuperAdmin) {
+      const user = await User.findById(interview.userId);
+      if (!user) {
+        res.status(404).json({ message: "User not found for this interview." });
+        return;
+      }
+
+      // Check if admin manages any pod that contains this user
+      const managedPods = await Pod.find({
+        $or: [
+          { managedBy: requester._id },
+          { createdBy: requester._id },
+        ],
+        isDeleted: false,
+      });
+
+      const userInManagedPod = managedPods.some((pod) =>
+        pod.invitedUsers.some(
+          (invitedUser) =>
+            invitedUser.userId?.toString() === interview.userId.toString() &&
+            invitedUser.status === "joined"
+        )
+      );
+
+      if (!userInManagedPod) {
+        res.status(403).json({
+          message: "You do not have permission to delete this interview.",
+        });
+        return;
+      }
+    }
+
+    // Delete the interview
+    await interview.deleteOne();
+
+    res.status(200).json({
+      message: "Interview deleted successfully.",
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    res.status(500).json({
+      message: "Error deleting interview.",
+      error: errorMessage,
+    });
+  }
+};
+
+/**
  * @desc Get pod-wise interview statistics (Admin only)
  * @route GET /api/interviews/admin/pod-statistics
  * @access Private (Admin/SuperAdmin only)

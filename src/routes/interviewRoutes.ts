@@ -11,6 +11,7 @@ import {
   getPodInterviewReports,
   getAllInterviewReports,
   getPodInterviewStatistics,
+  deleteInterview,
 } from "../controllers/interviewController.js";
 
 import { protect } from "../middlewares/authMiddleware.js";
@@ -258,6 +259,22 @@ router.get(
   ],
   validateRequest,
   getPodInterviewReports as unknown as RequestHandler
+);
+
+/**
+ * @route DELETE /api/interviews/:interviewId
+ * @desc Delete an interview (Admin/SuperAdmin only)
+ * @access Private (Admin/SuperAdmin only)
+ */
+router.delete(
+  "/:interviewId",
+  [
+    param("interviewId")
+      .isMongoId()
+      .withMessage("Invalid interview ID format."),
+  ],
+  validateRequest,
+  deleteInterview as unknown as RequestHandler
 );
 
 export default router;
