@@ -104,7 +104,7 @@ export const startInterview = async (
       userId: new mongoose.Types.ObjectId(userId),
       amount: 1,
       reason: "Interview Attendance",
-      interviewId: new mongoose.Types.ObjectId(interview._id),
+      interviewId: new mongoose.Types.ObjectId(interview._id as mongoose.Types.ObjectId),
       description: `Interview started for ${jobRole || "general"} position`,
       performedBy: null, // User initiated, not admin
       balanceBefore,
