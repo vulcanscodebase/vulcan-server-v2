@@ -6,6 +6,7 @@ import { Admin, type IAdmin } from "../models/Admin.js";
 import { Role, type IRole } from "../models/Role.js";
 import { type IBlacklist, Blacklist } from "../models/Blacklist.js";
 import { Pod } from "../models/Pod.js";
+import { User } from "../models/User.js";
 import { sendPasswordSetupEmail } from "../utils/email.js";
 
 // 🧩 Types for request body
@@ -840,6 +841,77 @@ export const getCurrentAdmin = async (
     });
   } catch (error) {
     console.error("❌ Error fetching current admin:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+/**
+ * @desc Get all users (Super Admin only)
+ * @route GET /api/admin/users
+ * @access Private (Super Admin only)
+ */
+export const getAllUsers = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account as IAdmin | undefined;
+
+    if (!requester) {
+      res.status(401).json({ message: "Unauthorized: No account found in request." });
+      return;
+    }
+
+    // ✅ Only super admins can view all users
+    if (!requester.isSuperAdmin) {
+      console.warn(`❌ ${requester.email} attempted to view all users without super admin permission`);
+      res.status(403).json({
+        message: "Access denied. Only Super Admins can view all users.",
+      });
+      return;
+    }
+
+    const { page = 1, limit = 50, search, verified } = req.query;
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build query
+    const query: any = {};
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search as string, $options: "i" } },
+        { email: { $regex: search as string, $options: "i" } },
+      ];
+    }
+
+    if (verified !== undefined) {
+      query.verified = verified === "true";
+    }
+
+    // Get total count
+    const total = await User.countDocuments(query);
+
+    // Get users
+    const users = await User.find(query)
+      .select("-password -resetPasswordToken -resetPasswordExpire -verificationToken -googleRefreshToken")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    res.status(200).json({
+      users,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching all users:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
