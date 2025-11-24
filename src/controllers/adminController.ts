@@ -7,6 +7,7 @@ import { Role, type IRole } from "../models/Role.js";
 import { type IBlacklist, Blacklist } from "../models/Blacklist.js";
 import { Pod } from "../models/Pod.js";
 import { User } from "../models/User.js";
+import { Interview } from "../models/Interview.js";
 import { sendPasswordSetupEmail } from "../utils/email.js";
 
 // 🧩 Types for request body
@@ -959,7 +960,7 @@ export const deleteUser = async (
     // ✅ Check if user has any interviews or important data
     // Note: We'll allow deletion even if interviews exist, but log it
     // Super admin can override this if needed
-    const interviewCount = await mongoose.connection.db.collection("interviews").countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
+    const interviewCount = await Interview.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
     if (interviewCount > 0) {
       console.warn(`⚠️ User ${userToDelete.email} has ${interviewCount} interview(s) - proceeding with deletion anyway (super admin override)`);
     }
