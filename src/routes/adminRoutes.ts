@@ -12,6 +12,7 @@ import {
   refreshTokenAdmin,
   deleteAdmin,
   getAllUsers,
+  deleteUser,
 } from "../controllers/adminController.js";
 
 import {
@@ -77,7 +78,14 @@ router.get(
   getAllUsers as RequestHandler
 );
 
-// ✅ 7. Super Admin Mass Upload (Super Admin Only)
+// ✅ 7. Delete User (Super Admin Only)
+router.delete(
+  "/users/:userId",
+  requirePermission("SuperAdmin", "delete") as RequestHandler,
+  deleteUser as RequestHandler
+);
+
+// ✅ 8. Super Admin Mass Upload (Super Admin Only)
 router.post(
   "/mass-upload-preview",
   requireAdmin() as RequestHandler,

@@ -915,3 +915,70 @@ export const getAllUsers = async (
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+/**
+ * @desc Delete a user (Super Admin only)
+ * @route DELETE /api/admin/users/:userId
+ * @access Private (Super Admin only)
+ */
+export const deleteUser = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const requester = req.account as IAdmin | undefined;
+    const { userId } = req.params as { userId: string };
+
+    if (!requester) {
+      res.status(401).json({ message: "Unauthorized: No account found in request." });
+      return;
+    }
+
+    // ✅ Only super admins can delete users
+    if (!requester.isSuperAdmin) {
+      console.warn(`❌ ${requester.email} attempted to delete user without super admin permission`);
+      res.status(403).json({
+        message: "Access denied. Only Super Admins can delete users.",
+      });
+      return;
+    }
+
+    // ✅ Validate userId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ message: "Invalid user ID format." });
+      return;
+    }
+
+    // ✅ Find the user to delete
+    const userToDelete = await User.findById(userId);
+    if (!userToDelete) {
+      res.status(404).json({ message: "User not found." });
+      return;
+    }
+
+    // ✅ Check if user has any interviews or important data
+    // Note: We'll allow deletion even if interviews exist, but log it
+    // Super admin can override this if needed
+    const interviewCount = await mongoose.connection.db.collection("interviews").countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
+    if (interviewCount > 0) {
+      console.warn(`⚠️ User ${userToDelete.email} has ${interviewCount} interview(s) - proceeding with deletion anyway (super admin override)`);
+    }
+
+    // ✅ Delete the user
+    await userToDelete.deleteOne();
+
+    console.log(`✅ User '${userToDelete.email}' (ID: ${userId}) deleted successfully by ${requester.email}`);
+
+    res.status(200).json({
+      message: `User '${userToDelete.name}' has been successfully deleted.`,
+      deletedUser: {
+        id: userToDelete._id,
+        name: userToDelete.name,
+        email: userToDelete.email,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error deleting user:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
