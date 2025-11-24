@@ -532,12 +532,12 @@ export const getAllAdmins = async (
  * @access Private (Super Admin only)
  */
 export const deleteAdmin = async (
-  req: Request<{ adminId: string }>,
+  req: Request,
   res: Response
 ): Promise<void> => {
   try {
     const requester = req.account as IAdmin | undefined;
-    const { adminId } = req.params;
+    const { adminId } = req.params as { adminId: string };
 
     if (!requester) {
       res.status(401).json({ message: "Unauthorized: No account found in request." });
@@ -567,7 +567,7 @@ export const deleteAdmin = async (
     }
 
     // ✅ Prevent deleting yourself
-    if (requester._id.toString() === adminId) {
+    if (requester._id && requester._id.toString() === adminId) {
       res.status(400).json({
         message: "You cannot delete your own admin account. Please contact another super admin.",
       });
