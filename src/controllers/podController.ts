@@ -742,6 +742,46 @@ export const bulkAddPodUsers = async (
       return;
     }
 
+    // ✅ License validation for bulk upload (regular admins only)
+    if (!admin.isSuperAdmin) {
+      const podTotal = pod.totalLicenses || 0;
+      const podAssigned = pod.assignedLicenses || 0;
+      const podAvailable = Math.max(0, podTotal - podAssigned);
+
+      // Calculate total licenses needed for new users
+      const newUsersLicensesNeeded = newUsers.reduce((sum: number, user: any) => {
+        return sum + (user.licenses || 0);
+      }, 0);
+
+      // Calculate additional licenses needed for existing users
+      const existingUsersLicensesNeeded = await Promise.all(
+        existingUsers.map(async (user: any) => {
+          const existing = await User.findOne({ email: user.email });
+          if (!existing) return 0;
+          const previousLicenses = existing.licenses || 0;
+          const newLicenses = user.licenses || 0;
+          return Math.max(0, newLicenses - previousLicenses);
+        })
+      );
+      const totalExistingLicensesNeeded = existingUsersLicensesNeeded.reduce((sum, val) => sum + val, 0);
+
+      const totalLicensesNeeded = newUsersLicensesNeeded + totalExistingLicensesNeeded;
+
+      if (totalLicensesNeeded > podAvailable) {
+        res.status(400).json({
+          message: `Insufficient licenses in pod. Available: ${podAvailable}, Needed: ${totalLicensesNeeded}. Please reduce license assignments or contact super admin to add more licenses.`,
+          pod: {
+            name: pod.name,
+            totalLicenses: podTotal,
+            assignedLicenses: podAssigned,
+            availableLicenses: podAvailable,
+          },
+          required: totalLicensesNeeded,
+        });
+        return;
+      }
+    }
+
     const isLocked = pod.type !== "private";
 
     const invitedUserRecords = await Promise.all(
@@ -867,6 +907,18 @@ export const bulkAddPodUsers = async (
         return existing;
       })
     );
+
+    // ✅ Update pod's assigned licenses count
+    const totalNewLicenses = newUsers.reduce((sum: number, user: any) => sum + (user.licenses || 0), 0);
+    const totalExistingLicenseIncrease = existingUsers.reduce((sum: number, user: any, index: number) => {
+      const existing = updatedUsers[index];
+      if (!existing) return sum;
+      const previousLicenses = existing.licenses || 0;
+      const newLicenses = user.licenses || 0;
+      return sum + Math.max(0, newLicenses - previousLicenses);
+    }, 0);
+    
+    pod.assignedLicenses = (pod.assignedLicenses || 0) + totalNewLicenses + totalExistingLicenseIncrease;
 
     await pod.save();
 
