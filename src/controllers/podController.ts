@@ -505,7 +505,7 @@ export const getPodUsers = async (
         .skip(skip)
         .limit(limitNum)
         .select(
-          "name email verified profileLocked profession schoolOrCollege organization qualification dob createdAt"
+          "name email verified profileLocked profession schoolOrCollege organization qualification dob createdAt licenses uniqueId"
         ),
     ]);
 

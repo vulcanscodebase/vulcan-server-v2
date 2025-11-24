@@ -94,8 +94,36 @@ export const startInterview = async (
 
     await interview.save();
 
+    // ✅ Deduct license immediately when interview starts (after resume upload)
+    const balanceBefore = currentBalance;
+    const balanceAfter = balanceBefore - 1;
+
+    // Create license deduction transaction
+    const transaction = new Transaction({
+      type: "deducted",
+      userId: new mongoose.Types.ObjectId(userId),
+      amount: 1,
+      reason: "Interview Attendance",
+      interviewId: new mongoose.Types.ObjectId(interview._id),
+      description: `Interview started for ${jobRole || "general"} position`,
+      performedBy: null, // User initiated, not admin
+      balanceBefore,
+      balanceAfter,
+      status: "completed",
+      metadata: {
+        jobRole: jobRole || "general",
+        interviewStartTime: interview.startedAt,
+      },
+    });
+
+    // Update user's license balance
+    user.licenses = balanceAfter;
+
+    // Save all changes (interview, transaction, user)
+    await Promise.all([transaction.save(), user.save()]);
+
     res.status(201).json({
-      message: "Interview session started successfully.",
+      message: "Interview session started successfully and license deducted.",
       interview: {
         _id: interview._id,
         userId: interview.userId,
@@ -103,10 +131,18 @@ export const startInterview = async (
         startedAt: interview.startedAt,
         status: interview.status,
       },
+      transaction: {
+        _id: transaction._id,
+        type: transaction.type,
+        amount: transaction.amount,
+        reason: transaction.reason,
+        balanceBefore,
+        balanceAfter,
+      },
       userBalance: {
-        current: currentBalance,
-        willBeDeducted: 1,
-        willRemainAfter: currentBalance - 1,
+        before: balanceBefore,
+        after: balanceAfter,
+        deducted: 1,
       },
     });
   } catch (error) {
@@ -120,7 +156,7 @@ export const startInterview = async (
 };
 
 /**
- * @desc Complete an interview session and deduct license
+ * @desc Complete an interview session (license already deducted at start)
  * @route POST /api/interviews/complete
  * @access Private (Authenticated Users)
  */
@@ -167,25 +203,8 @@ export const completeInterview = async (
       return;
     }
 
-    // Fetch user for license deduction
-    const user = await User.findById(userId);
-    if (!user) {
-      res.status(404).json({ message: "User not found." });
-      return;
-    }
-
-    const balanceBefore = user.licenses || 0;
-
-    // Check sufficient licenses
-    if (balanceBefore < 1) {
-      res.status(400).json({
-        message: "Insufficient licenses to complete this interview.",
-        currentBalance: balanceBefore,
-      });
-      return;
-    }
-
-    const balanceAfter = balanceBefore - 1;
+    // ✅ License was already deducted when interview started (after resume upload)
+    // No need to deduct again here
 
     // Update interview with completion data
     interview.status = "completed";
@@ -198,54 +217,15 @@ export const completeInterview = async (
       completedAt: new Date(),
     };
 
-    // Create license deduction transaction
-    const transaction = new Transaction({
-      type: "deducted",
-      userId: new mongoose.Types.ObjectId(userId),
-      amount: 1,
-      reason: "Interview Attendance",
-      interviewId: new mongoose.Types.ObjectId(interviewId),
-      description: `Interview completed for ${
-        interview.jobRole || "general"
-      } position`,
-      performedBy: null, // User initiated, not admin
-      balanceBefore,
-      balanceAfter,
-      status: "completed",
-      metadata: {
-        jobRole: interview.jobRole,
-        interviewDuration: interview.completedAt
-          ? (interview.completedAt.getTime() - interview.startedAt.getTime()) /
-            1000 // Duration in seconds
-          : 0,
-      },
-    });
-
-    // Update user's license balance
-    user.licenses = balanceAfter;
-
-    // Save all changes (interview, transaction, user)
-    await Promise.all([interview.save(), transaction.save(), user.save()]);
+    // Save interview
+    await interview.save();
 
     res.status(200).json({
-      message: "Interview completed successfully and license deducted.",
+      message: "Interview completed successfully.",
       interview: {
         _id: interview._id,
         status: interview.status,
         completedAt: interview.completedAt,
-      },
-      transaction: {
-        _id: transaction._id,
-        type: transaction.type,
-        amount: transaction.amount,
-        reason: transaction.reason,
-        balanceBefore,
-        balanceAfter,
-      },
-      userBalance: {
-        before: balanceBefore,
-        after: balanceAfter,
-        deducted: 1,
       },
     });
   } catch (error) {
@@ -648,8 +628,52 @@ export const getAllInterviewReports = async (
       query.status = status;
     }
 
-    // If podId is provided, filter by pod users
+    // ✅ For regular admins (not super admin), filter by their managed pods
     let userIds: mongoose.Types.ObjectId[] | undefined;
+    if (!requester.isSuperAdmin) {
+      // Get all pods managed or created by this admin
+      const managedPods = await Pod.find({
+        $or: [
+          { managedBy: requester._id },
+          { createdBy: requester._id },
+        ],
+        isDeleted: false,
+      });
+
+      // Get all user IDs from managed pods
+      const allUserIds: mongoose.Types.ObjectId[] = [];
+      for (const pod of managedPods) {
+        const podUserIds = pod.invitedUsers
+          .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
+          .map((invitedUser) => invitedUser.userId) as mongoose.Types.ObjectId[];
+        allUserIds.push(...podUserIds);
+      }
+
+      if (allUserIds.length === 0) {
+        // Admin has no users in their pods
+        res.status(200).json({
+          message: "No interview reports found for your managed pods.",
+          interviews: [],
+          pagination: {
+            total: 0,
+            page,
+            limit,
+            pages: 0,
+          },
+          statistics: {
+            totalInterviews: 0,
+            completedInterviews: 0,
+            inProgressInterviews: 0,
+            abandonedInterviews: 0,
+          },
+        });
+        return;
+      }
+
+      userIds = allUserIds;
+    }
+
+    // If podId is provided, filter by pod users (overrides admin's managed pods filter)
     if (podId) {
       if (!mongoose.Types.ObjectId.isValid(podId)) {
         res.status(400).json({ message: "Invalid podId format." });
@@ -660,8 +684,31 @@ export const getAllInterviewReports = async (
         userIds = pod.invitedUsers
           .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
           .map((invitedUser) => invitedUser.userId) as mongoose.Types.ObjectId[];
-        query.userId = { $in: userIds };
       }
+    }
+
+    // Apply user filter if we have userIds
+    if (userIds && userIds.length > 0) {
+      query.userId = { $in: userIds };
+    } else if (userIds && userIds.length === 0) {
+      // No users found, return empty result
+      res.status(200).json({
+        message: "No interview reports found.",
+        interviews: [],
+        pagination: {
+          total: 0,
+          page,
+          limit,
+          pages: 0,
+        },
+        statistics: {
+          totalInterviews: 0,
+          completedInterviews: 0,
+          inProgressInterviews: 0,
+          abandonedInterviews: 0,
+        },
+      });
+      return;
     }
 
     // Fetch interviews with user details
