@@ -468,8 +468,17 @@ export const updateInterviewFeedback = async (
       return;
     }
 
-    // Update only the report field
+    // Update the report field
     interview.report = report || null;
+    
+    // ✅ If report is provided and interview is not already completed, mark it as completed
+    if (report && interview.status !== "completed") {
+      interview.status = "completed";
+      if (!interview.completedAt) {
+        interview.completedAt = new Date();
+      }
+    }
+    
     await interview.save();
 
     res.status(200).json({
