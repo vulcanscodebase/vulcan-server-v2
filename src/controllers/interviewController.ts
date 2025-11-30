@@ -554,8 +554,12 @@ export const getPodInterviewReports = async (
       .map((invitedUser) => {
         // Handle both ObjectId and string formats
         const userId = invitedUser.userId;
-        return userId instanceof mongoose.Types.ObjectId ? userId : new mongoose.Types.ObjectId(userId);
-      });
+        if (!userId) return null;
+        return userId instanceof mongoose.Types.ObjectId 
+          ? userId 
+          : new mongoose.Types.ObjectId(userId as string);
+      })
+      .filter((id): id is mongoose.Types.ObjectId => id !== null);
 
     if (userIds.length === 0) {
       res.status(200).json({
