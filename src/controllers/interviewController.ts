@@ -195,8 +195,9 @@ export const completeInterview = async (
       return;
     }
 
-    // Verify interview status is still started or in_progress
-    if (interview.status !== "started" && interview.status !== "in_progress") {
+    // Allow completion if status is started or in_progress
+    // Also allow updating if already completed (to ensure data consistency)
+    if (interview.status === "abandoned") {
       res.status(400).json({
         message: `Cannot complete interview with status: ${interview.status}`,
       });
@@ -207,18 +208,33 @@ export const completeInterview = async (
     // No need to deduct again here
 
     // Update interview with completion data
+    // Always set status to completed and update completedAt if not already set
     interview.status = "completed";
-    interview.completedAt = new Date();
-    interview.report = report || null;
-    interview.questionsData = questionsData || null;
+    if (!interview.completedAt) {
+      interview.completedAt = new Date();
+    }
+    
+    // Update report if provided
+    if (report) {
+      interview.report = report;
+    }
+    
+    // Update questionsData if provided
+    if (questionsData) {
+      interview.questionsData = questionsData;
+    }
+    
+    // Update metadata
     interview.metadata = {
       ...interview.metadata,
       ...customMetadata,
-      completedAt: new Date(),
+      completedAt: interview.completedAt,
     };
 
     // Save interview
     await interview.save();
+    
+    console.log(`✅ Interview ${interviewId} completed successfully. Status: ${interview.status}, CompletedAt: ${interview.completedAt}, Has report: ${!!interview.report}`);
 
     res.status(200).json({
       message: "Interview completed successfully.",
@@ -265,17 +281,66 @@ export const getInterviewDetails = async (
       return;
     }
 
-    // Access control: User can only view their own interviews, admins can view any
-    // Handle both populated and non-populated userId
+    // Access control: 
+    // - Users can only view their own interviews
+    // - Super Admins can view any interview
+    // - Regular Admins can only view interviews from users in their managed pods
     const interviewUserId = (interview.userId as any)?._id || interview.userId;
     const requesterId = (requester._id || requester.id)?.toString();
     
-    if (
-      interviewUserId &&
-      interviewUserId.toString() !== requesterId &&
-      requester.role !== "admin" &&
-      !requester.isSuperAdmin
-    ) {
+    // If user is viewing their own interview, allow
+    if (interviewUserId && interviewUserId.toString() === requesterId) {
+      // User viewing their own interview - allow
+    } 
+    // If super admin, allow
+    else if (requester.isSuperAdmin) {
+      // Super admin can view any interview - allow
+    }
+    // If regular admin, check if user is in their managed pods
+    else if (requester.role === "admin") {
+      // Check if the interview user is in any pod managed by this admin
+      const managedPods = await Pod.find({
+        $or: [
+          { managedBy: requester._id },
+          { createdBy: requester._id },
+        ],
+        isDeleted: false,
+      });
+
+      // Get all user IDs from managed pods
+      const allUserIds: mongoose.Types.ObjectId[] = [];
+      for (const pod of managedPods) {
+        const podUserIds = pod.invitedUsers
+          .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
+          .map((invitedUser) => {
+            const userId = invitedUser.userId;
+            if (!userId) return null;
+            return userId instanceof mongoose.Types.ObjectId 
+              ? userId 
+              : new mongoose.Types.ObjectId(userId as string);
+          })
+          .filter((id): id is mongoose.Types.ObjectId => id !== null);
+        allUserIds.push(...podUserIds);
+      }
+
+      // Check if interview user is in admin's managed pods
+      const interviewUserIdObj = interviewUserId instanceof mongoose.Types.ObjectId 
+        ? interviewUserId 
+        : new mongoose.Types.ObjectId(interviewUserId as string);
+      
+      const hasAccess = allUserIds.some(
+        (uid) => uid.toString() === interviewUserIdObj.toString()
+      );
+
+      if (!hasAccess) {
+        res.status(403).json({
+          message: "You do not have permission to view this interview. You can only view interviews from users in your managed pods.",
+        });
+        return;
+      }
+    }
+    // Regular users cannot view other users' interviews
+    else {
       res.status(403).json({
         message: "You do not have permission to view this interview.",
       });
@@ -469,23 +534,35 @@ export const updateInterviewFeedback = async (
     }
 
     // Update the report field
-    interview.report = report || null;
-    
-    // ✅ If report is provided and interview is not already completed, mark it as completed
-    if (report && interview.status !== "completed") {
-      interview.status = "completed";
-      if (!interview.completedAt) {
-        interview.completedAt = new Date();
+    // Always update report if provided (even if empty object)
+    const previousStatus = interview.status;
+    if (report !== undefined && report !== null) {
+      interview.report = report;
+      
+      // ✅ Always mark interview as completed when report is saved
+      // This ensures the interview status is updated even if completeInterview wasn't called
+      if (interview.status !== "completed") {
+        interview.status = "completed";
+        if (!interview.completedAt) {
+          interview.completedAt = new Date();
+        }
+        console.log(`✅ Interview ${interviewId} marked as completed via feedback update. Previous status: ${previousStatus}, New status: ${interview.status}`);
+      } else {
+        console.log(`ℹ️ Interview ${interviewId} already completed, updating report only`);
       }
     }
+    // If report is undefined/null, don't update (keep existing report)
     
     await interview.save();
+    
+    console.log(`✅ Interview ${interviewId} saved. Final status: ${interview.status}, Has report: ${!!interview.report}, CompletedAt: ${interview.completedAt}`);
 
     res.status(200).json({
       message: "Interview feedback updated successfully.",
       interview: {
         _id: interview._id,
         status: interview.status,
+        completedAt: interview.completedAt,
         report: interview.report,
       },
     });
