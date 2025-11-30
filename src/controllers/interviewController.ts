@@ -257,16 +257,22 @@ export const getInterviewDetails = async (
       return;
     }
 
-    const interview = await Interview.findById(interviewId);
+    const interview = await Interview.findById(interviewId)
+      .populate("userId", "name email profilePhoto")
+      .lean();
     if (!interview) {
       res.status(404).json({ message: "Interview not found." });
       return;
     }
 
-    // Access control: User can only view their own interviews
+    // Access control: User can only view their own interviews, admins can view any
+    // Handle both populated and non-populated userId
+    const interviewUserId = (interview.userId as any)?._id || interview.userId;
+    const requesterId = (requester._id || requester.id)?.toString();
+    
     if (
-      interview.userId.toString() !==
-        (requester._id || requester.id).toString() &&
+      interviewUserId &&
+      interviewUserId.toString() !== requesterId &&
       requester.role !== "admin" &&
       !requester.isSuperAdmin
     ) {
@@ -522,10 +528,34 @@ export const getPodInterviewReports = async (
       return;
     }
 
+    // ✅ For regular admins (not super admin), verify they have access to this pod
+    if (!requester.isSuperAdmin) {
+      const requesterId = (requester._id || requester.id)?.toString();
+      const podCreatorId = pod.createdBy?.toString();
+      const podManagerId = pod.managedBy?.toString();
+
+      // Check if admin is the creator, manager, or has access through parent pod
+      const hasAccess =
+        podCreatorId === requesterId ||
+        podManagerId === requesterId ||
+        (pod.parentPodId && pod.parentPodId.toString() === requesterId);
+
+      if (!hasAccess) {
+        res.status(403).json({
+          message: "Access denied. You do not have permission to view reports for this pod.",
+        });
+        return;
+      }
+    }
+
     // Get all user IDs from the pod's invitedUsers who have joined
     const userIds = pod.invitedUsers
       .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
-      .map((invitedUser) => invitedUser.userId);
+      .map((invitedUser) => {
+        // Handle both ObjectId and string formats
+        const userId = invitedUser.userId;
+        return userId instanceof mongoose.Types.ObjectId ? userId : new mongoose.Types.ObjectId(userId);
+      });
 
     if (userIds.length === 0) {
       res.status(200).json({
@@ -688,28 +718,33 @@ export const getAllInterviewReports = async (
     }
 
     // Apply user filter if we have userIds
-    if (userIds && userIds.length > 0) {
-      query.userId = { $in: userIds };
-    } else if (userIds && userIds.length === 0) {
-      // No users found, return empty result
-      res.status(200).json({
-        message: "No interview reports found.",
-        interviews: [],
-        pagination: {
-          total: 0,
-          page,
-          limit,
-          pages: 0,
-        },
-        statistics: {
-          totalInterviews: 0,
-          completedInterviews: 0,
-          inProgressInterviews: 0,
-          abandonedInterviews: 0,
-        },
-      });
-      return;
+    // For super admins, userIds will be undefined, so no filter is applied (they see all interviews)
+    // For regular admins, userIds will contain their pod users' IDs
+    if (userIds !== undefined) {
+      if (userIds.length > 0) {
+        query.userId = { $in: userIds };
+      } else {
+        // No users found, return empty result
+        res.status(200).json({
+          message: "No interview reports found.",
+          interviews: [],
+          pagination: {
+            total: 0,
+            page,
+            limit,
+            pages: 0,
+          },
+          statistics: {
+            totalInterviews: 0,
+            completedInterviews: 0,
+            inProgressInterviews: 0,
+            abandonedInterviews: 0,
+          },
+        });
+        return;
+      }
     }
+    // If userIds is undefined (super admin case), query remains empty and fetches all interviews
 
     // Fetch interviews with user details
     const interviews = await Interview.find(query)
