@@ -800,11 +800,14 @@ export const getAllInterviewReports = async (
         return;
       }
       const pod = await Pod.findById(podId);
-      if (pod) {
+      if (!pod) {
+        res.status(404).json({ message: "Pod not found." });
+        return;
+      }
+      // Get user IDs from the pod
         userIds = pod.invitedUsers
           .filter((invitedUser) => invitedUser.userId && invitedUser.status === "joined")
           .map((invitedUser) => invitedUser.userId) as mongoose.Types.ObjectId[];
-      }
     }
 
     // Apply user filter if we have userIds
